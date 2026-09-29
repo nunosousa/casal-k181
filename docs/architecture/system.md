@@ -21,6 +21,28 @@ Two intelligent nodes on the vehicle, plus passive subsystems:
   without tools).
 - SWD for PCB-level debugging (internal, short, not routed through the
   harness).
+- **Vehicle exterior lamp control logic** (per
+  [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)):
+  headlight, tail, brake, front and rear indicators, horn. Blink
+  timing generated locally from steady-state rider-intent bits
+  received over CAN. Physical switching hardware lives in the PDM
+  (see below).
+- **Charge controller logic** — drives PDM charge FETs.
+
+**Power Distribution Module (PDM)** — separate hardware enclosure
+adjacent to the ECU (per
+[ADR-0008](../project/decisions/0008-separate-power-distribution-module.md)).
+Passive hardware controlled by the ECU MCU via a short inter-module
+cable. **Not a CAN node.** Owns:
+
+- Main fuse, reverse-polarity protection, bus TVS.
+- Supercap bank (ADR-0004 kick-start bootstrap buffer).
+- Battery charging FETs (physical MOSFETs; logic in ECU).
+- Per-lamp blade fuses in ATO holders behind a serviceable cover.
+- Automotive relays in sockets (headlight low, high, horn).
+- Lamp-drive MOSFETs (indicators, tail, brake).
+- Clean 12 V feed to ECU and switched rail to handlebar controller.
+- Vehicle harness connector for all lamp outputs.
 
 **Handlebar controller** — in the headlight nacelle or a small hidden
 enclosure near the handlebar mount. Owns:
@@ -28,10 +50,12 @@ enclosure near the handlebar mount. Owns:
 - Stepper motor drivers for speedometer and tachometer needles.
 - LED drivers for warning-lamp cluster and gauge illumination.
 - Handlebar switchgear inputs (indicators, horn, headlight, mode buttons).
-- Rear lamp drivers via low-side MOSFETs (long wires to tail acceptable).
 - GPS module UART (assumption: module co-located in headlight nacelle).
 - CAN participation: consumer of engine state, producer of GPS state and
   user-input events.
+- Dashboard indicator-lamp repeater blink (locally timed at ~1.5 Hz;
+  small phase drift from ECU-commanded exterior indicators is
+  acceptable).
 
 **Passive subsystems:**
 
@@ -89,8 +113,9 @@ piece of state.
 | Battery voltage | ECU | Handlebar controller (warning) |
 | Coolant / oil pressure | n/a | n/a |
 | Ignition state (running, cranking, off) | ECU | Handlebar controller |
-| Turn signal request | Handlebar controller | (self, and rear lamps) |
-| Turn signal state (active, hazard) | Handlebar controller | — |
+| Turn signal request (rider intent) | Handlebar controller | ECU (drives blink) |
+| Turn signal exterior lamp state | ECU (locally-generated blink) | — |
+| Turn signal dashboard-repeater state | Handlebar controller (locally-generated blink) | — |
 | Position, altitude, GPS speed | Handlebar controller (from GPS) | ECU (logs) |
 | Ambient temperature / pressure / humidity | ECU | (logs) |
 | Session log | ECU | — |

@@ -1,6 +1,6 @@
 # ADR-0001: Two-node CAN topology (ECU + handlebar controller)
 
-**Status:** Accepted
+**Status:** Accepted (lamp-drive ownership refined by [ADR-0007](0007-lamp-drive-moves-to-ecu.md))
 **Date:** 2026-09-28
 
 ## Context

@@ -120,6 +120,13 @@ tachometer and speedometer needles.
 - `handlebar_switches` — indicator, horn, headlight, mode-button state
   bits.
 
+**Semantic note (per [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)):**
+`handlebar_switches.indicator_left / indicator_right / hazard` bits
+carry **rider intent** (steady-state "L requested"), not the physical
+blink phase. The ECU consumes these bits and generates the exterior-
+lamp blink locally at ~1.5 Hz. The handlebar drives its dashboard
+indicator repeaters on its own timer at the same nominal rate.
+
 ### 4.6 Handlebar medium periodic (5 Hz, 0x400–0x41F)
 
 - `gps_position` — latitude and longitude as int32 at 1e-7 degrees.

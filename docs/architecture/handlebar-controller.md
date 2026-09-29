@@ -26,11 +26,11 @@ Owns:
   passive dashboard enclosures).
 - Warning-lamp cluster drive (LEDs).
 - Dashboard illumination.
-- Front indicator, rear indicator, rear brake, rear tail, horn, and
-  headlight (low/high) drive.
+- Dashboard indicator repeaters (blinked locally at ~1.5 Hz;
+  small phase drift from ECU-driven exterior indicators acceptable).
 - Handlebar switchgear inputs (indicator, hazard, horn, headlight,
-  kill switch, mode buttons, brake switches).
-- Turn-signal and hazard timing.
+  kill switch, mode buttons, brake switches). Rider-intent bits
+  broadcast on CAN.
 - Twistgrip TPS sensor (AS5600 I2C).
 - GPS module (u-blox class, UART).
 - Odometer persistence.
@@ -41,6 +41,12 @@ Does not own:
 - Engine management — ECU.
 - Rider-observed speed (measurement) — ECU (from front wheel Hall);
   handlebar receives the value on CAN and drives the needle.
+- **Exterior lamp drive** (headlight, tail, brake, front/rear
+  indicators, horn) — physical switching hardware lives in the PDM
+  per [ADR-0008](../project/decisions/0008-separate-power-distribution-module.md);
+  logic ownership is on the ECU per
+  [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md).
+  The handlebar reports rider intent via CAN.
 - Data logging — ECU. The handlebar has no bulk log storage, only a
   small config/odometer/fault store.
 
@@ -204,53 +210,27 @@ speedometer and tachometer dial faces.
 - Auto-dim: an ambient light sensor (TSL2591 or a simple photoresistor
   ADC input) provides day/night adaptive brightness.
 
-## 6. Vehicle exterior lamps, indicators, horn, headlight
+## 6. Exterior lamp drive — not on this node
 
-All vehicle exterior lamps driven from this node. Per
-[ADR-0005](../project/decisions/0005-retain-incandescent-exterior-lamps.md)
-they are **original-format 12 V incandescent bulbs** in the stock K181
-housings, not LEDs. This drives the following design changes from the
-prior LED-oriented plan:
+Per [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md),
+the ECU drives all vehicle exterior lamps (headlight, tail, brake,
+front and rear indicators, horn). The handlebar controller's role in
+lighting is limited to:
 
-- **Steady-state currents are ~10× higher** than LED equivalents
-  (~3 A for headlight, ~1.75 A for brake, ~0.8 A per indicator).
-- **Cold-filament inrush** is 5-10× the steady current for a few ms
-  at turn-on.
-- **PWM (if used for dimming)** must be ≥ 1 kHz to avoid filament
-  thermal cycling. Dimming is not a phase-1 feature.
-- **Harness wire gauge** on lamp channels increases to 18-20 AWG.
+- Reading the physical switchgear (indicator L/R, hazard, horn,
+  headlight low/high, kill switch, brake front/rear sense).
+- Broadcasting the rider-intent bits on CAN via `handlebar_switches`
+  (0x310) at 100 Hz.
+- Driving the *interior* indicator repeater lamps in the dashboard
+  cluster at a locally-generated ~1.5 Hz blink. Small phase drift
+  from the ECU-driven exterior indicators is acceptable and not
+  visually significant.
 
-Drive stage per channel:
-
-| Channel | Drive | Rationale |
-|---|---|---|
-| Headlight low | Automotive relay (Bosch 3057-class), controlled by MCU GPIO via small transistor | 3 A steady + cold inrush best handled by mechanical contact; low duty cycle |
-| Headlight high | Automotive relay | Same as low |
-| Front indicator L / R | N-MOSFET low-side, 10 A / 60 V class (IRLZ44N or STP80NF12) | ~0.8 A steady, ~5 A peak inrush; MOSFET adequate |
-| Rear indicator L / R | Same MOSFET as front indicator | Same |
-| Rear tail | N-MOSFET, 5 A class | ~0.4 A steady; small MOSFET adequate |
-| Rear brake | N-MOSFET, 10 A class | ~1.75 A steady, ~10 A inrush |
-| Horn (mechanical) | Automotive relay | 2-5 A brief; relay tolerates inrush and arcing |
-
-Each MOSFET or relay drive circuit:
-
-- TVS diode on drain / relay-contact side (~24 V clamp).
-- Free-wheel diode across relay coil.
-- Gate driver (small logic-level, driven from MCU GPIO).
-- Optional: current-sense for open-lamp and short-lamp detection
-  (post-phase 1).
-
-Timers:
-
-- Turn-signal blink: TIM4 or software timer, ~1.5 Hz on/off. This is
-  independent of drive-stage choice.
-- Hazard: same, both indicators simultaneously.
-
-**Load-shedding scope** is bounded by regulation (Portuguese daytime
-headlight requirement). Under low bus/battery voltage, only
-dashboard illumination and (marginally) indicator repetition rate are
-sheddable. Headlight, tail, and brake are always fully driven when
-requested.
+No MOSFETs, relays, or per-lamp fuses live on this PCB. Enclosure
+size and thermal budget are correspondingly smaller than the
+originally-planned handlebar controller. See
+[handlebar-controller.md §12](#12-enclosure-and-thermal) for the
+revised enclosure target.
 
 ## 7. TPS input
 
@@ -370,10 +350,13 @@ adequate.
 
 ## 12. Enclosure and thermal
 
-- **Small aluminium enclosure**, ~60 × 40 × 20 mm, IP54.
+- **Small aluminium enclosure**, ~50 × 35 × 15 mm (reduced from an
+  earlier ~60 × 40 × 20 mm plan following the removal of the lamp
+  drive stage per [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)).
+  IP54 rating.
 - Mounted inside the headlight nacelle, rubber-isolated.
-- No cooling required — total dissipation ~3-5 W spread across a
-  substantial enclosure surface.
+- No cooling required — total dissipation ~1.5-2.5 W spread across the
+  enclosure surface.
 - The stepper drivers are the hottest components (~0.3 W each). Board
   layout should keep them near the enclosure wall for conduction to
   ambient.

@@ -45,57 +45,54 @@ are 12 V-rated incandescent equivalents of the original-era units.
 Block-level:
 
     +----------------------+
-    | Flywheel magneto     |
+    | Flywheel magneto     |   Modern 12V unit (VAPE.eu class, ADR-0006)
     |  (stator coils, AC)  |
     +----------+-----------+
                |
                v (AC, RPM-dependent)
     +----------+-----------+
-    | Shunt-type R/R       |  Passive rectifier + MOSFET shunt.
-    |  AC -> DC bus        |  Rectifier stage works even with MOSFET
-    |  Regulated to 14.4 V |  control unpowered.
-    +----------+-----------+
-               |
-               v (DC bus)
-    +----------+-----------+
-    | Supercap bank (~1 F, |  Buffers DC bus. Sized so a handful of
-    |  15 V rated)         |  kicks bring bus above ECU brownout.
-    +----------+-----------+
-               |
-               +--> Main fuse (~15 A) --> DC bus (distribution point)
-                        |
-                        +--> ECU (via own fuse, ideal-diode input)
-                        |
-                        +--> Battery charging controller
-                        |         |
-                        |         v
-                        |     LiFePO4 4-5 Ah battery
-                        |     (back-feeds bus through controlled path
-                        |      when bus < Vbat, else charges from bus)
-                        |
-                        +--> Ignition switch
-                                 |
-                                 v
-                          +--------------------+
-                          | Switched 12V rail  |
-                          +---+------------+---+
-                              |            |
-                              v            v
-                        Handlebar    Rear lamps (via handlebar
-                        controller   controller's MOSFETs and
-                                     relays)
+    |         PDM          |   Power Distribution Module (ADR-0008).
+    |                      |   Separate hardware enclosure adjacent
+    |  - Shunt-type R/R    |   to the ECU. Not a CAN node. Contains
+    |  - Main fuse (15 A)  |   all fuses, relays, MOSFETs, supercap.
+    |  - Reverse-polarity  |
+    |    P-FET             |
+    |  - TVS + EMI filter  |
+    |  - Supercap bank     |
+    |    (~1 F / 15 V)     |
+    |  - Battery charge    |
+    |    FETs              |
+    |  - Per-lamp blade    |
+    |    fuses in ATO      |
+    |    holders           |
+    |  - ISO 7588 relays   |
+    |    in sockets        |
+    |    (HL low, HL high, |
+    |     horn)            |
+    |  - Lamp-drive MOSFETs|
+    |    (indicators,      |
+    |     tail, brake)     |
+    +---+--------------+---+
+        |              |
+        |              v
+        |         Vehicle harness --> exterior lamps + horn
+        |
+        +--> Clean 12V bus + coil-driver feed --> ECU
+        |
+        +--> Battery + / − (LiFePO4 4-5 Ah)
+        |
+        +--> Ignition switch --> switched rail --> handlebar ctrl
 
-Key architectural points, expanded below:
+Key architectural points:
 
-- The DC bus is the main rail. It is fed by the R/R output and buffered
-  by the supercap.
-- The battery is *not* directly on the bus. A charging controller
-  arbitrates: charge current bus→battery when bus is above the
-  charging setpoint; back-feed battery→bus when bus droops below Vbat.
-- All loads run off the bus, either directly (ECU) or via the ignition
-  switch (everything else).
+- The DC bus is the main rail, buffered by the supercap, distributed
+  from the PDM.
+- The battery is on a separate branch behind PDM-resident charge FETs.
+- The ECU receives clean 12 V from the PDM and does not carry any
+  main-fuse, main-protection, supercap, or lamp-drive components.
 - With a flat battery, kicking spins the stator, the passive rectifier
-  charges the supercap, the ECU boots off the supercap and fires spark.
+  in the PDM charges the supercap, the ECU boots off the supercap and
+  fires spark.
 
 ## Load budget
 
@@ -223,25 +220,30 @@ amps into the battery. Charge FETs rated for ≥ 5 A continuous.
 
 Revised current ratings:
 
-- **Main fuse** (bus-to-distribution): **~15 A blade** (was 10 A).
-  Sized above steady load with headroom for horn transient plus
-  simultaneous hazard.
+- **Main fuse** (bus-to-distribution): **~15 A blade**. Sized above
+  steady load with headroom for horn transient plus simultaneous
+  hazard.
 - **Per-node fuses:**
-  - ECU: 5 A (unchanged).
-  - Handlebar controller (switched-rail feed to the electronics only,
-    not to lamps directly): 3 A.
+  - ECU (input protection stage feeding MCU and control electronics):
+    5 A.
+  - Handlebar controller (small — controller electronics only, since
+    exterior lamp drive lives on the ECU per
+    [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)):
+    2 A.
+- **Per-lamp fuses (on-board the ECU):**
   - Headlight low: 5 A.
   - Headlight high: 5 A.
   - Tail + brake: 5 A.
-  - Indicators (combined): 5 A.
+  - Indicators (combined or per side): 5 A.
   - Horn: 5 A.
 - **Reverse polarity protection:** P-channel MOSFET ideal-diode on
   the ECU input. Unchanged.
 - **Transient protection:** TVS diode at each MCU-bearing node's
-  input.
-- **Ignition switch:** cuts the switched rail feeding lamps and
-  handlebar controller. ECU stays powered momentarily to flush logs,
-  then sleeps at ~5 mA standby.
+  input; TVS on each lamp-drive output at the ECU.
+- **Ignition switch:** cuts the switched rail feeding the ECU's
+  lamp drive stage and the handlebar controller. ECU main power
+  stays on the bus so the ECU can flush logs and sleep at ~5 mA
+  standby.
 
 ## ECU internal rails
 

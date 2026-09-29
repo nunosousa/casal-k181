@@ -208,9 +208,12 @@ Existing lab equipment assumed. Requirements:
 Channels during timing tests:
 
 - CH1: Optical reference edge from the trigger wheel.
-- CH2: Coil driver gate signal (from the ECU's IGBT gate).
-- CH3: Coil primary voltage (differential probe on IGBT drain).
-- CH4: Coil primary current (from shunt monitor).
+- CH2: **PDM coil-driver gate signal** (commanded from ECU via inter-
+  module cable, driven at the IGBT gate on the PDM per
+  [ADR-0009](../project/decisions/0009-coil-driver-in-pdm.md)).
+- CH3: Coil primary voltage (differential probe on IGBT drain, at
+  PDM).
+- CH4: Coil primary current (from shunt monitor on PDM).
 
 ## 4. HIL controller firmware
 
@@ -374,13 +377,6 @@ Small separate bench, simpler:
 - Warning-lamp LEDs on a small panel.
 - Physical switch panel (indicator L/R, hazard, horn, headlight, kill,
   mode buttons).
-- **Incandescent-load test set** — real 12 V incandescent bulbs
-  (headlight, tail/brake, indicator) mounted on the bench, or
-  resistive equivalents sized to match the steady-state and cold-
-  inrush characteristics per
-  [ADR-0005](../project/decisions/0005-retain-incandescent-exterior-lamps.md).
-  Exercises the MOSFET / relay drive stages under realistic load,
-  including inrush.
 - Real AS5600 on a knobbed shaft.
 - Ambient light sensor exposed to bench light.
 - USB-CAN dongle simulating the ECU (or the real ECU via the vehicle
@@ -390,10 +386,48 @@ Small separate bench, simpler:
 
 Test cases mirror the ECU set but focused on the handlebar's
 responsibilities: gauge accuracy (commanded vs. observed needle
-angle), switch debounce, turn-signal timing, GPS parsing correctness,
-lamp control via CAN commands, **inrush-current handling on cold-lamp
-switch-on** (scope-captured current profile against MOSFET/relay
-datasheet safe-operating-area).
+angle), switch debounce, GPS parsing correctness, dashboard
+indicator-repeater blink timing.
+
+**Incandescent exterior-lamp load testing is on the ECU HIL rig**,
+not here — see [§6.7](#67-lamp-drive) below, added per
+[ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md).
+
+## 8a. ECU + PDM lamp-drive testing
+
+Since ADR-0007 assigned lamp drive logic to the ECU and ADR-0008
+placed the physical switching hardware in the PDM, the ECU HIL rig
+now includes the **PDM as a distinct unit under test**, connected to
+the ECU via its inter-module cable.
+
+- Real 12 V incandescent bulbs (headlight, tail/brake, indicator) on
+  the bench, connected to the PDM's vehicle-harness output, or
+  resistive equivalents sized to match steady-state and cold-inrush
+  characteristics per
+  [ADR-0005](../project/decisions/0005-retain-incandescent-exterior-lamps.md).
+- PDM's ISO 7588 relays populated in their sockets.
+- Current-sense shunts on selected channels for inrush profile
+  capture on the scope.
+
+Additional test cases:
+
+- `test_lamp_switching` — commanded lamp on/off via CAN
+  `handlebar_switches` bits; verify appropriate ECU output activates
+  and PDM output current profile matches expectation.
+- `test_indicator_blink` — set `indicator_left` rider-intent bit;
+  verify blink cadence at 1.5 Hz ± 5 %, symmetrical on/off.
+- `test_hazard` — set `hazard` bit; verify both L and R blink
+  in-phase.
+- `test_cold_inrush` — measure inrush current profile on cold
+  filament switch-on; verify MOSFET / relay stays in datasheet SOA.
+- `test_lamp_fault` — open-lamp and short-lamp fault injection;
+  verify fault detection where implemented, fuse behaviour where
+  not.
+- `test_pdm_interface` — deliberately disconnect the ECU-PDM control
+  cable; verify ECU detects the disconnection via absent
+  sense-return feedback (post-phase 1).
+- `test_fuse_replacement` — service-cover access verified without
+  opening either sealed compartment.
 
 ## 9. Bring-up sequence
 

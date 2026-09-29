@@ -23,7 +23,10 @@ Owns:
 
 - Crank position acquisition (36-1 Hall).
 - Coil driver (external inductive coil, low-side IGBT, integrated Zener
-  clamp).
+  clamp) — **commanded from the ECU MCU but physically resident in the
+  PDM** per [ADR-0009](../project/decisions/0009-coil-driver-in-pdm.md).
+  ECU output compare drives a logic-level trigger to the PDM; PDM
+  switches the coil primary; sense returns routed back to the ECU.
 - Front wheel speed acquisition.
 - EGT, CHT thermocouple acquisition.
 - TPS (contactless twistgrip sensor).
@@ -35,13 +38,20 @@ Owns:
   via FDCAN peripheral).
 - Service USB (single automotive-style connector).
 - Charge-controller MOSFET drive for the LiFePO4 battery.
+- **Vehicle exterior lamp drive** (per
+  [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)):
+  headlight (low + high, via relay), tail, brake, front and rear
+  indicators, horn (via relay). Per-lamp fuses on-board.
+- **Turn-signal blink timing** — locally generated at ~1.5 Hz from
+  the steady-state rider-intent bits in `handlebar_switches`.
 - SWD debug (internal, not routed off the PCB).
 
 Does not own:
 
 - Speedometer/tachometer display drive — handlebar controller.
 - Dashboard warning lamps — handlebar controller.
-- Turn signals, horn, lighting — handlebar controller.
+- Dashboard indicator repeater blink — handlebar controller (blinked
+  locally, small phase drift from exterior indicators acceptable).
 - GPS — handlebar controller (re-broadcast on CAN).
 
 ## 2. Block diagram
@@ -264,61 +274,56 @@ for phase 1; revisit if carburettor is later replaced.
 - Feeds spark-energy characterisation and misfire detection in later
   phases.
 
-## 6. Coil driver
+## 6. Coil driver — commanded here, resident in PDM
 
-### 6.1 Topology
+Per [ADR-0009](../project/decisions/0009-coil-driver-in-pdm.md), the
+coil driver IGBT + gate driver + primary current sense live in the
+[PDM](pdm.md). The ECU's role is:
 
-Low-side inductive (Kettering) with an external coil:
+- **Command:** TIM8 output compare generates the gate trigger at the
+  computed spark angle. Signal exits the ECU as a 5 V logic level via
+  the PDM interface connector.
+- **Consume sense returns:** primary current (differential, from PDM
+  shunt monitor) captured on ADC; drain voltage (single-ended)
+  captured on ADC for post-spark fault detection.
+- **Fault handling:** open coil, shorted coil, and no-spark faults
+  detected from the sense returns and logged in the fault log.
 
-    Battery +
-       |
-       +----[ External ignition coil primary ]----+
-                                                  |
-                                              Drain of IGBT
-                                                  |
-                                              +---+---+
-                                              |       |
-                                          Zener    Gate <- gate driver
-                                          clamp        (from TIM8 OC)
-                                              |
-                                              +
-                                              |
-                                          Sense R
-                                              |
-                                           Ground (star)
+The ECU PCB carries no IGBT, no gate driver, no coil primary current
+path. Analog measurement quality benefits accordingly.
 
-### 6.2 Part selection
+Spark-energy characterisation (windowed high-rate capture on the
+sense returns) still runs from the ECU MCU — it just reads
+differently-routed signals.
 
-- **IGBT: Bosch BIP373** or **STMicroelectronics VB525SP** or similar
-  automotive smart-IGBT with integrated Zener clamp at ~380 V and
-  built-in ESD protection. These parts are designed for exactly this
-  application and eliminate the discrete snubber network.
-- **Gate driver:** dedicated non-isolated gate driver IC (e.g. TC4420
-  or on-IGBT integrated driver) rated for the IGBT's gate charge.
-- **Sense resistor:** ~10-50 mΩ, non-inductive, sized for ~50-500 mV
-  full-scale over the coil primary current range.
-- **Differential amp for sense:** INA240 or similar high-CMRR current-
-  shunt monitor.
+## 6a. Exterior lamp control
 
-### 6.3 Firmware control
+Per [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)
+the ECU owns the logic that decides which vehicle exterior lamp
+should be on when. Per
+[ADR-0008](../project/decisions/0008-separate-power-distribution-module.md)
+the physical MOSFETs, relays, and per-lamp fuses that carry out that
+decision live in a separate **Power Distribution Module (PDM)**
+adjacent to the ECU. See [pdm.md](pdm.md).
 
-- Dwell time (time IGBT is held on, building coil current) commanded
-  by MCU based on a battery-voltage-compensated table.
-- Spark event triggered by TIM8 output compare configured against the
-  crank sync + timing map.
-- Fault flag if primary current fails to reach expected value during
-  dwell (open coil, driver fault).
-- Fault flag if drain voltage doesn't collapse post-spark (short
-  circuit, no spark).
+The ECU's role in exterior lighting is therefore:
 
-### 6.4 Layout constraints (flagged for schematic phase)
+- **Consume rider intent** from CAN 0x310 `handlebar_switches`.
+- **Generate blink timing** locally at ~1.5 Hz for indicators and
+  hazard.
+- **Drive the PDM's MOSFET gate lines and relay coils** via the
+  short inter-module control cable — one gate/coil drive line per
+  lamp channel.
+- **Consume sense returns** from the PDM (Vbat, Vbus, charge
+  current) for fault detection and load-shedding decisions.
 
-- **Star ground for coil return** — critical, must not share ground
-  path with sensor grounds.
-- Coil driver on its own supply domain (direct battery/bus feed, not
-  through the ECU input protection stage, to handle the 5-10 A pulsed
-  current without disturbing the sensor rails).
-- Copper pour for heat spreading on the IGBT.
+No MOSFETs, no relays, no per-lamp fuses on the ECU PCB. The lamp-
+drive logic runs on a soft-real-time task in the riding app.
+
+**Load-shedding scope** unchanged from ADR-0005: headlight cannot be
+shed (Portuguese daytime-headlight requirement); only interior
+illumination and (marginally) indicator duty cycle can be reduced
+under low bus voltage.
 
 ## 7. Storage
 
@@ -407,27 +412,43 @@ Log format (working plan):
 
 ## 9. Connectors
 
-Two connectors on the enclosure:
+Three connectors on the enclosure:
 
-**Vehicle harness connector** — main. Carries:
+**Vehicle harness connector** — engine-side sensor lines and CAN.
+Carries:
 
-- DC bus power in (from R/R output side)
-- Ground
+- Crank Hall, wheel Hall
+- EGT+, EGT−, CHT+, CHT−
 - CAN H, CAN L
-- Ignition switch sense line (voltage from switched rail)
-- Sensor lines (crank Hall, wheel Hall, TPS, EGT+, EGT−, CHT+, CHT−)
-  — for TPS this is the twistgrip AS5600's I2C running as long-cable;
-  see below.
-- Coil driver output (IGBT drain to coil primary), coil primary return
-- Charge controller drive lines (or the charge controller is on the
-  battery pack side; see open questions)
-- Reserved future channels: wideband lambda, MAP, second temp
+- Reserved: wideband lambda, MAP, second temp
 
 Connector candidate: **TE Superseal 1.0 series** or **Deutsch DT
 series** — sealed, IP67, automotive-grade, hand-crimpable.
-Pin count roughly 20-30 depending on final channel list.
+Pin count roughly 15-20 depending on final channel list.
 
-**Service connector** — separate, smaller:
+Note: coil primary drive no longer exits the ECU. See PDM interface
+connector below.
+
+**PDM interface connector** — short cable to the adjacent PDM per
+[ADR-0008](../project/decisions/0008-separate-power-distribution-module.md)
+and [ADR-0009](../project/decisions/0009-coil-driver-in-pdm.md).
+Carries (~23 lines):
+
+- Clean 12 V power in + ground (from PDM's fused, protected DC bus)
+- 7 × MOSFET gate drives (lamp channels)
+- 3 × relay coil drives (headlight low, high, horn)
+- 2 × charge FET drives (charge, discharge)
+- **1 × coil-driver gate command** (TIM8 OC, logic level)
+- 3 × general sense returns (Vbat, Vbus, charge current)
+- **2 × coil sense returns** (primary current differential pair,
+  drain voltage single-ended)
+- 2 × spare
+
+Connector candidate: sealed multi-pin, mid-density. If the ECU and
+PDM enclosures are physically abutted, a board-to-board mezzanine
+option is possible.
+
+**Service connector** — smaller:
 
 - USB (5 V, D+, D−, GND)
 - CAN H, CAN L, GND (for diagnostic tools that connect via CAN
@@ -480,6 +501,9 @@ Thermal budget:
 At 5 W dissipated to a 200 cm² aluminium enclosure with reasonable
 airflow, ambient-to-internal rise is 15-25 °C. Acceptable for the
 0-40 °C ambient range of Portuguese Sunday-riding.
+
+(Lamp drive and battery charging thermal loads live in the PDM per
+[ADR-0008](../project/decisions/0008-separate-power-distribution-module.md).)
 
 ## 11. Fault diagnostics
 

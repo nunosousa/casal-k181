@@ -1,0 +1,41 @@
+# Build outputs
+build/
+target/
+obj/
+bin/
+*.o
+*.elf
+*.hex
+*.bin
+*.map
+
+# Generated code
+protocol/generated/
+
+# Session data logs — large, kept outside git
+data/sessions/
+data/raw/
+*.mcap
+*.mf4
+*.bin.log
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Ada
+alire.toml.lock
+alire/

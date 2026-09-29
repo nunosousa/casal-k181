@@ -1,0 +1,677 @@
+# Casal K181 vehicle CAN protocol
+#
+# Canonical machine-readable definition. Codegen produces C and Ada
+# headers for both firmware images from this file. Human-readable
+# rationale lives in docs/architecture/can-bus.md.
+
+version: 1
+name: k181-vehicle-can
+description: Two-node vehicle CAN protocol (ECU + handlebar controller)
+
+bus:
+  bitrate: 500000        # bit/s
+  can_fd: false
+  identifier_width: 11
+  termination_ohms: 120  # at each bus end
+
+nodes:
+  - name: ecu
+    address: 0x01
+    description: Engine control unit
+  - name: handlebar
+    address: 0x02
+    description: Handlebar controller / body-control module
+
+# Signal encoding conventions:
+#   endian: little (all signals)
+#   physical = raw * scale + offset
+#   raw is treated as unsigned unless "signed: true"
+
+messages:
+
+  # ---------------------------------------------------------------
+  # Emergency / event (0x000-0x03F)
+  # ---------------------------------------------------------------
+
+  - id: 0x010
+    name: ecu_emergency_stop
+    producer: ecu
+    consumers: [handlebar]
+    kind: event
+    description: ECU is shutting down engine due to critical fault.
+    signals:
+      - name: reason
+        start_bit: 0
+        length_bits: 8
+        type: enum
+        enum:
+          0x00: none
+          0x01: coil_driver_fault
+          0x02: crank_sensor_fault
+          0x03: overtemp
+          0x04: bus_off_persistent
+          0xFF: rider_request
+
+  - id: 0x011
+    name: ecu_fault_event
+    producer: ecu
+    consumers: [handlebar]
+    kind: event
+    description: New fault added to ECU fault log.
+    signals:
+      - name: fault_code
+        start_bit: 0
+        length_bits: 16
+      - name: severity
+        start_bit: 16
+        length_bits: 4
+        type: enum
+        enum:
+          0: info
+          1: warning
+          2: error
+          3: critical
+      - name: aux_data
+        start_bit: 24
+        length_bits: 32
+
+  - id: 0x020
+    name: handlebar_emergency_stop
+    producer: handlebar
+    consumers: [ecu]
+    kind: event
+    description: Handlebar requests engine stop.
+    signals:
+      - name: reason
+        start_bit: 0
+        length_bits: 8
+        type: enum
+        enum:
+          0x00: none
+          0x01: kill_switch
+          0x02: overspeed
+          0xFF: user_request
+
+  - id: 0x021
+    name: handlebar_fault_event
+    producer: handlebar
+    consumers: [ecu]
+    kind: event
+    description: New fault added to handlebar fault log.
+    signals:
+      - name: fault_code
+        start_bit: 0
+        length_bits: 16
+      - name: severity
+        start_bit: 16
+        length_bits: 4
+        type: enum
+        enum: { 0: info, 1: warning, 2: error, 3: critical }
+      - name: aux_data
+        start_bit: 24
+        length_bits: 32
+
+  - id: 0x030
+    name: session_event
+    producer: ecu
+    consumers: [handlebar]
+    kind: event
+    description: Session boundary event (start, stop, sleep, wake).
+    signals:
+      - name: event_type
+        start_bit: 0
+        length_bits: 8
+        type: enum
+        enum:
+          0x01: session_start
+          0x02: session_stop
+          0x03: sleep
+          0x04: wake
+      - name: session_id
+        start_bit: 8
+        length_bits: 32
+        description: Monotonically increasing session identifier.
+
+  # ---------------------------------------------------------------
+  # ECU fast periodic (0x100-0x1FF, 100 Hz / 10 ms)
+  # ---------------------------------------------------------------
+
+  - id: 0x100
+    name: engine_state_fast
+    producer: ecu
+    consumers: [handlebar]
+    kind: periodic
+    period_ms: 10
+    description: RPM, commanded ignition advance, dwell, running state.
+    signals:
+      - name: rpm
+        start_bit: 0
+        length_bits: 16
+        scale: 0.25
+        offset: 0
+        unit: rpm
+        min: 0
+        max: 16383.75
+      - name: ignition_advance_deg_btdc
+        start_bit: 16
+        length_bits: 12
+        scale: 0.1
+        offset: -20.0
+        signed: false
+        unit: degBTDC
+        min: -20.0
+        max: 389.5
+      - name: dwell_actual_us
+        start_bit: 28
+        length_bits: 12
+        scale: 1
+        offset: 0
+        unit: us
+      - name: engine_running
+        start_bit: 40
+        length_bits: 1
+        type: bool
+      - name: cranking
+        start_bit: 41
+        length_bits: 1
+        type: bool
+      - name: reserved
+        start_bit: 42
+        length_bits: 22
+
+  - id: 0x110
+    name: vehicle_state_fast
+    producer: ecu
+    consumers: [handlebar]
+    kind: periodic
+    period_ms: 10
+    description: Wheel-derived speed and distance.
+    signals:
+      - name: wheel_speed_mps
+        start_bit: 0
+        length_bits: 16
+        scale: 0.01
+        offset: 0
+        unit: m/s
+      - name: distance_m_low
+        start_bit: 16
+        length_bits: 32
+        unit: m
+        description: Low 32 bits of running distance counter since boot.
+      - name: moving
+        start_bit: 48
+        length_bits: 1
+        type: bool
+      - name: reserved
+        start_bit: 49
+        length_bits: 15
+
+  - id: 0x120
+    name: throttle_state
+    producer: ecu
+    consumers: [handlebar]
+    kind: periodic
+    period_ms: 10
+    description: TPS as observed and used by the ECU (echo of handlebar-produced value).
+    signals:
+      - name: tps_used_percent
+        start_bit: 0
+        length_bits: 12
+        scale: 0.1
+        offset: 0
+        unit: '%'
+        min: 0
+        max: 409.5
+      - name: tps_used_raw
+        start_bit: 16
+        length_bits: 12
+
+  # ---------------------------------------------------------------
+  # ECU medium periodic (0x200-0x22F, 10 Hz / 100 ms)
+  # ---------------------------------------------------------------
+
+  - id: 0x200
+    name: thermal_state
+    producer: ecu
+    consumers: [handlebar]
+    kind: periodic
+    period_ms: 100
+    description: EGT, CHT, MCU internal temperature.
+    signals:
+      - name: egt_c
+        start_bit: 0
+        length_bits: 16
+        signed: true
+        scale: 0.25
+        offset: 0
+        unit: degC
+      - name: cht_c
+        start_bit: 16
+        length_bits: 16
+        signed: true
+        scale: 0.25
+        offset: 0
+        unit: degC
+      - name: mcu_c
+        start_bit: 32
+        length_bits: 8
+        signed: true
+        scale: 1
+        offset: 0
+        unit: degC
+      - name: egt_valid
+        start_bit: 40
+        length_bits: 1
+        type: bool
+      - name: cht_valid
+        start_bit: 41
+        length_bits: 1
+        type: bool
+
+  - id: 0x210
+    name: power_state
+    producer: ecu
+    consumers: [handlebar]
+    kind: periodic
+    period_ms: 100
+    description: Battery, bus voltages; charge current.
+    signals:
+      - name: vbat_mv
+        start_bit: 0
+        length_bits: 16
+        unit: mV
+      - name: vbus_mv
+        start_bit: 16
+        length_bits: 16
+        unit: mV
+      - name: charge_current_ma
+        start_bit: 32
+        length_bits: 16
+        signed: true
+        unit: mA
+        description: Positive charging battery, negative discharging.
+      - name: charge_mode
+        start_bit: 48
+        length_bits: 4
+        type: enum
+        enum:
+          0: off
+          1: bulk
+          2: absorb
+          3: float
+          4: standby
+          5: fault
+
+  - id: 0x220
+    name: ignition_diag
+    producer: ecu
+    consumers: [handlebar]
+    kind: periodic
+    period_ms: 100
+    description: Spark diagnostics.
+    signals:
+      - name: primary_peak_ma
+        start_bit: 0
+        length_bits: 16
+        unit: mA
+      - name: dwell_error_us
+        start_bit: 16
+        length_bits: 16
+        signed: true
+        unit: us
+        description: Actual minus commanded dwell.
+      - name: misfire_count
+        start_bit: 32
+        length_bits: 16
+        description: Rolling window misfire count.
+      - name: spark_ok
+        start_bit: 48
+        length_bits: 1
+        type: bool
+
+  # ---------------------------------------------------------------
+  # ECU slow periodic (0x230-0x2FF, 1 Hz / 1000 ms)
+  # ---------------------------------------------------------------
+
+  - id: 0x230
+    name: ambient_state
+    producer: ecu
+    consumers: [handlebar]
+    kind: periodic
+    period_ms: 1000
+    description: BME280-derived ambient conditions.
+    signals:
+      - name: ambient_c
+        start_bit: 0
+        length_bits: 16
+        signed: true
+        scale: 0.01
+        offset: 0
+        unit: degC
+      - name: pressure_pa
+        start_bit: 16
+        length_bits: 24
+        scale: 1
+        offset: 0
+        unit: Pa
+      - name: humidity_pct
+        start_bit: 40
+        length_bits: 8
+        scale: 0.5
+        offset: 0
+        unit: '%'
+
+  - id: 0x240
+    name: ecu_heartbeat
+    producer: ecu
+    consumers: [handlebar]
+    kind: periodic
+    period_ms: 1000
+    description: Version and health.
+    signals:
+      - name: fw_major
+        start_bit: 0
+        length_bits: 8
+      - name: fw_minor
+        start_bit: 8
+        length_bits: 8
+      - name: fw_patch
+        start_bit: 16
+        length_bits: 8
+      - name: fault_summary
+        start_bit: 24
+        length_bits: 8
+        description: Bitfield summarising fault-log severities.
+      - name: uptime_s
+        start_bit: 32
+        length_bits: 32
+        unit: s
+
+  # ---------------------------------------------------------------
+  # Handlebar fast periodic (0x300-0x3FF, 100 Hz / 10 ms)
+  # ---------------------------------------------------------------
+
+  - id: 0x300
+    name: user_input_fast
+    producer: handlebar
+    consumers: [ecu]
+    kind: periodic
+    period_ms: 10
+    description: TPS from the twistgrip AS5600, filtered and raw.
+    signals:
+      - name: tps_filtered_percent
+        start_bit: 0
+        length_bits: 12
+        scale: 0.1
+        offset: 0
+        unit: '%'
+      - name: tps_raw_deg
+        start_bit: 16
+        length_bits: 16
+        scale: 0.01
+        offset: 0
+        unit: deg
+      - name: tps_valid
+        start_bit: 32
+        length_bits: 1
+        type: bool
+
+  - id: 0x310
+    name: handlebar_switches
+    producer: handlebar
+    consumers: [ecu]
+    kind: periodic
+    period_ms: 10
+    description: Handlebar switchgear state bits.
+    signals:
+      - name: indicator_left
+        start_bit: 0
+        length_bits: 1
+        type: bool
+      - name: indicator_right
+        start_bit: 1
+        length_bits: 1
+        type: bool
+      - name: hazard
+        start_bit: 2
+        length_bits: 1
+        type: bool
+      - name: horn
+        start_bit: 3
+        length_bits: 1
+        type: bool
+      - name: headlight_low
+        start_bit: 4
+        length_bits: 1
+        type: bool
+      - name: headlight_high
+        start_bit: 5
+        length_bits: 1
+        type: bool
+      - name: brake_front
+        start_bit: 6
+        length_bits: 1
+        type: bool
+      - name: brake_rear
+        start_bit: 7
+        length_bits: 1
+        type: bool
+      - name: kill_switch
+        start_bit: 8
+        length_bits: 1
+        type: bool
+      - name: mode_button
+        start_bit: 9
+        length_bits: 1
+        type: bool
+
+  # ---------------------------------------------------------------
+  # Handlebar medium periodic (0x400-0x41F, 5 Hz / 200 ms)
+  # ---------------------------------------------------------------
+
+  - id: 0x400
+    name: gps_position
+    producer: handlebar
+    consumers: [ecu]
+    kind: periodic
+    period_ms: 200
+    description: GPS-derived latitude and longitude.
+    signals:
+      - name: latitude_deg_e7
+        start_bit: 0
+        length_bits: 32
+        signed: true
+        scale: 1.0e-7
+        offset: 0
+        unit: deg
+      - name: longitude_deg_e7
+        start_bit: 32
+        length_bits: 32
+        signed: true
+        scale: 1.0e-7
+        offset: 0
+        unit: deg
+
+  - id: 0x410
+    name: gps_speed_alt
+    producer: handlebar
+    consumers: [ecu]
+    kind: periodic
+    period_ms: 200
+    description: GPS-derived speed over ground, altitude, HDOP.
+    signals:
+      - name: speed_mps
+        start_bit: 0
+        length_bits: 16
+        scale: 0.01
+        offset: 0
+        unit: m/s
+      - name: altitude_m
+        start_bit: 16
+        length_bits: 16
+        signed: true
+        scale: 0.1
+        offset: 0
+        unit: m
+      - name: hdop
+        start_bit: 32
+        length_bits: 8
+        scale: 0.1
+        offset: 0
+      - name: num_sats
+        start_bit: 40
+        length_bits: 8
+      - name: fix_valid
+        start_bit: 48
+        length_bits: 1
+        type: bool
+
+  # ---------------------------------------------------------------
+  # Handlebar slow periodic (0x420-0x4FF, 1 Hz / 1000 ms)
+  # ---------------------------------------------------------------
+
+  - id: 0x420
+    name: gps_fix_state
+    producer: handlebar
+    consumers: [ecu]
+    kind: periodic
+    period_ms: 1000
+    description: GPS fix metadata and UTC time.
+    signals:
+      - name: fix_quality
+        start_bit: 0
+        length_bits: 4
+        type: enum
+        enum:
+          0: no_fix
+          1: gps_fix
+          2: dgps_fix
+          3: rtk_float
+          4: rtk_fixed
+      - name: utc_unix_s
+        start_bit: 8
+        length_bits: 32
+        unit: s
+        description: Seconds since Unix epoch.
+      - name: geoidal_sep_m
+        start_bit: 40
+        length_bits: 16
+        signed: true
+        scale: 0.1
+        offset: 0
+        unit: m
+
+  - id: 0x430
+    name: handlebar_heartbeat
+    producer: handlebar
+    consumers: [ecu]
+    kind: periodic
+    period_ms: 1000
+    description: Version and health of handlebar controller.
+    signals:
+      - name: fw_major
+        start_bit: 0
+        length_bits: 8
+      - name: fw_minor
+        start_bit: 8
+        length_bits: 8
+      - name: fw_patch
+        start_bit: 16
+        length_bits: 8
+      - name: fault_summary
+        start_bit: 24
+        length_bits: 8
+      - name: uptime_s
+        start_bit: 32
+        length_bits: 32
+        unit: s
+
+  # ---------------------------------------------------------------
+  # Diagnostic / configuration (0x700-0x77F, event)
+  # ---------------------------------------------------------------
+
+  - id: 0x700
+    name: diag_request_ecu
+    producer: any
+    consumers: [ecu]
+    kind: event
+    description: Diagnostic request directed at the ECU.
+    signals:
+      - name: service_id
+        start_bit: 0
+        length_bits: 8
+      - name: payload
+        start_bit: 8
+        length_bits: 56
+
+  - id: 0x701
+    name: diag_response_ecu
+    producer: ecu
+    consumers: [any]
+    kind: event
+    description: Diagnostic response from the ECU.
+    signals:
+      - name: service_id
+        start_bit: 0
+        length_bits: 8
+      - name: status
+        start_bit: 8
+        length_bits: 8
+        type: enum
+        enum:
+          0x00: ok
+          0x01: not_supported
+          0x02: bad_param
+          0x03: locked
+          0x04: busy
+          0xFF: fault
+      - name: payload
+        start_bit: 16
+        length_bits: 48
+
+  - id: 0x702
+    name: diag_request_handlebar
+    producer: any
+    consumers: [handlebar]
+    kind: event
+    description: Diagnostic request directed at the handlebar controller.
+    signals:
+      - name: service_id
+        start_bit: 0
+        length_bits: 8
+      - name: payload
+        start_bit: 8
+        length_bits: 56
+
+  - id: 0x703
+    name: diag_response_handlebar
+    producer: handlebar
+    consumers: [any]
+    kind: event
+    description: Diagnostic response from the handlebar controller.
+    signals:
+      - name: service_id
+        start_bit: 0
+        length_bits: 8
+      - name: status
+        start_bit: 8
+        length_bits: 8
+        type: enum
+        enum:
+          0x00: ok
+          0x01: not_supported
+          0x02: bad_param
+          0x03: locked
+          0x04: busy
+          0xFF: fault
+      - name: payload
+        start_bit: 16
+        length_bits: 48
+
+  # ---------------------------------------------------------------
+  # Multi-frame reserved (ISO-TP over these IDs, 0x780-0x781)
+  # ---------------------------------------------------------------
+
+  # 0x780: handlebar -> ECU multi-frame (ISO-TP)
+  # 0x781: ECU -> handlebar multi-frame (ISO-TP)
+  # Not enumerated as fixed messages — payload structure per service.

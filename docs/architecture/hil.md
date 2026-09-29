@@ -374,6 +374,13 @@ Small separate bench, simpler:
 - Warning-lamp LEDs on a small panel.
 - Physical switch panel (indicator L/R, hazard, horn, headlight, kill,
   mode buttons).
+- **Incandescent-load test set** — real 12 V incandescent bulbs
+  (headlight, tail/brake, indicator) mounted on the bench, or
+  resistive equivalents sized to match the steady-state and cold-
+  inrush characteristics per
+  [ADR-0005](../project/decisions/0005-retain-incandescent-exterior-lamps.md).
+  Exercises the MOSFET / relay drive stages under realistic load,
+  including inrush.
 - Real AS5600 on a knobbed shaft.
 - Ambient light sensor exposed to bench light.
 - USB-CAN dongle simulating the ECU (or the real ECU via the vehicle
@@ -384,7 +391,9 @@ Small separate bench, simpler:
 Test cases mirror the ECU set but focused on the handlebar's
 responsibilities: gauge accuracy (commanded vs. observed needle
 angle), switch debounce, turn-signal timing, GPS parsing correctness,
-lamp control via CAN commands.
+lamp control via CAN commands, **inrush-current handling on cold-lamp
+switch-on** (scope-captured current profile against MOSFET/relay
+datasheet safe-operating-area).
 
 ## 9. Bring-up sequence
 

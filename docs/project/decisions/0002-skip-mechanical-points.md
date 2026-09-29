@@ -1,6 +1,6 @@
 # ADR-0002: Skip mechanical points, first-start on ECU-controlled fixed-timing ignition
 
-**Status:** Accepted (refined by [ADR-0004](0004-kick-start-flat-battery.md))
+**Status:** Accepted (refined by [ADR-0004](0004-kick-start-flat-battery.md) and [ADR-0006](0006-modern-magneto-replacement.md))
 **Date:** 2026-09-28
 
 ## Context

@@ -68,10 +68,15 @@ Post-processing:
 
 ## 5. Mounting
 
-Two candidate methods; final choice pinned after physical inspection
-of the K181 flywheel.
+The 36-1 wheel mounts on the outer face of the **new modern rotor**
+supplied with the VAPE-class 12 V magneto replacement kit
+(see [ADR-0006](../project/decisions/0006-modern-magneto-replacement.md)).
+The stock K181 flywheel is not retained.
 
-### 5.1 Option A: retaining-compound bonded ring on outer flywheel face
+Two candidate mounting methods; final choice pinned after physical
+inspection of the received rotor.
+
+### 5.1 Option A: retaining-compound bonded ring on outer rotor face
 
 - **Adhesive:** Loctite 638 or 620 retaining compound. High-strength,
   oil-tolerant, thermal-stable to > 150 °C.
@@ -79,21 +84,36 @@ of the K181 flywheel.
   acetone; light cross-hatch abrasion (Scotch-Brite grade A or 240
   grit).
 - **Concentricity:** align on a purpose-made mandrel jig that
-  registers off the flywheel's centre bore; apply light axial pressure
+  registers off the rotor's centre bore; apply light axial pressure
   during cure (24 h cure).
-- **Reversibility:** heat to > 200 °C to release. Preserves the
-  flywheel for future work.
+- **Reversibility:** heat to > 200 °C to release. Preserves the rotor
+  for future work.
 
 ### 5.2 Option B: mechanical fastening via a machined adapter
 
-- **Adapter:** aluminium hub bolted to the flywheel through an
-  existing bolt pattern (verify presence at inspection).
+- **Adapter:** aluminium hub bolted to the rotor through an
+  accessible bolt pattern (verify presence at inspection of the
+  received rotor).
 - **Trigger wheel:** bolted to the adapter with 3 × M4 through
   clearance holes on the wheel and tapped holes in the adapter.
 - **Trade-off:** higher precision, serviceable, higher cost.
 
-**Provisional plan:** Option A unless the flywheel offers a convenient
-bolt pattern.
+**Provisional plan:** Option A unless the received rotor offers a
+convenient bolt pattern or the VAPE integrated trigger tab
+interferes with a bonded ring.
+
+### 5.3 VAPE integrated trigger
+
+The VAPE rotor typically ships with an integrated trigger feature
+(single tooth or magnet) intended for the VAPE ignition CDI. We do
+not use that trigger. Two disposition options:
+
+- **Leave in place** if it does not interfere with the 36-1 wheel
+  mounting or with the Hall sensor bracket. Simplest.
+- **Physically remove** (machine off) if it interferes. Requires care
+  not to unbalance the rotor.
+
+Physical inspection of the received rotor determines the choice.
 
 ## 6. Sensor bracket
 
@@ -165,17 +185,19 @@ reports sync acquired.
 
 ## 9. Open questions
 
-- **Final mounting method** (bond vs. adapter) — pinned after K181
-  flywheel inspection.
-- **Preservation of the original points assembly.** The mechanical
-  points and cam remain inside the flywheel, mechanically undisturbed
-  by the trigger wheel. Retain-but-disconnect is the provisional plan
-  (reversible, archival). Removal is possible if it interferes with
-  trigger-wheel mounting.
+- **Final mounting method** (bond vs. adapter) — pinned after
+  received rotor is physically inspected.
+- **Disposition of the VAPE integrated trigger tab** — leave in
+  place or machine off; decided at rotor inspection.
+- **Whether the VAPE rotor's outer face is amenable to retaining-
+  compound bonding.** VAPE rotors are typically machined steel or
+  cast — normally fine with Loctite 638 — but verify with the
+  supplier or by test on a scrap surface.
 
 ## 10. Related
 
 - [ECU subsystem §5.1](../architecture/ecu.md)
 - [HIL bench §3.1](../architecture/hil.md)
 - [ADR-0002: Skip mechanical points](../project/decisions/0002-skip-mechanical-points.md)
+- [ADR-0006: Modern magneto replacement](../project/decisions/0006-modern-magneto-replacement.md)
 - [Staged plan phase 1](../project/staged-plan.md)

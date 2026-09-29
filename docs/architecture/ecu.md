@@ -556,7 +556,10 @@ the [staged plan](../project/staged-plan.md)):
 - **ECU physical mounting location on the frame** — determined
   during frame inspection in phase 0.
 - **External coil model** — deferred; drives the IGBT drive
-  parameters.
+  parameters. Candidates: the HT coil supplied with the VAPE-class
+  12 V magneto kit ([ADR-0006](../project/decisions/0006-modern-magneto-replacement.md)),
+  or a separate modern automotive coil. Bench comparison on the HIL
+  rig if both are available.
 - **Log format** — self-describing binary custom vs. MCAP-native on
   device. Custom is simpler on device; MCAP-native is friendlier for
   tools. Decision needed before firmware log module is written.

@@ -15,13 +15,29 @@ what the project *is*.
   Casal M151-derived two-stroke, not a fundamentally different racing
   engine.
 
+## Road-legal compliance
+
+- **Exterior lamps must be incandescent.** LED lamps in the stock K181
+  exterior lamp housings (headlight, tail, brake, front and rear
+  indicators) are not road-legal in Portugal because the housings'
+  reflector and lens optics are designed around incandescent-filament
+  emitters; LED retrofit disturbs the certified photometric properties.
+  See [ADR-0005](decisions/0005-retain-incandescent-exterior-lamps.md).
+- **Horn: non-LED.** Same rationale; also unrelated to LED question but
+  covered by the same "original technology in stock housings" principle.
+- Dashboard interior illumination (behind dial faces) and warning-lamp
+  cluster (visible only to the rider) are unaffected — LED remains
+  acceptable there.
+- **Daytime headlight** required for two-wheelers under Portuguese law.
+  Bounds load-shedding policy (the headlight cannot be shed).
+
 ## Character preservation
 
-- The finished vehicle must remain visually and mechanically recognisable as
-  a Casal K181.
-- Instrumentation and modernised electronics must not be visually obtrusive.
-  No probes hanging out of the exhaust, no zip-tied harnesses, no visible
-  aftermarket displays. Service access hidden under panels.
+- The finished vehicle must remain visually and mechanically recognisable
+  as a Casal K181.
+- Instrumentation and modernised electronics must not be visually
+  obtrusive. No probes hanging out of the exhaust, no zip-tied harnesses,
+  no visible aftermarket displays. Service access hidden under panels.
 - Original dial faces (or credible reproductions) preferred on dashboard
   gauges, driven by modern electronics behind the panel.
 
@@ -36,9 +52,9 @@ what the project *is*.
 ## Intended use
 
 - Occasional Sunday riding. Not a race vehicle, not a pure test rig.
-- Must survive rain, vibration, seasonal thermal cycling, and being ignored
-  for months. This drives IP-rated enclosures, sealed connectors, conformal
-  coating, and non-consumer-grade internal storage.
+- Must survive rain, vibration, seasonal thermal cycling, and being
+  ignored for months. This drives IP-rated enclosures, sealed connectors,
+  conformal coating, and non-consumer-grade internal storage.
 - Must never leave the rider stranded due to a soft failure in the ECU.
   Boot into a safe fixed-timing map on any config-store or map fault.
 

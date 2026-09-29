@@ -106,8 +106,12 @@ piece of state.
 - **Coil-driver fault:** logged; engine cannot run. This is not a
   soft-failure case.
 - **Battery critical low:** ECU broadcasts warning; handlebar controller
-  shows warning lamp. Engine continues to run if magneto can sustain
-  ignition current.
+  shows warning lamp and sheds interior illumination. Exterior lamps
+  (headlight, tail, brake, indicators) are legally required and are
+  not shed. Engine continues to run as long as ECU rail is stable.
+- **Stator under-capacity relative to load** (e.g. rewind not yet done,
+  or degraded): battery slowly drains during running. Warned via CAN.
+  Not immediate emergency; rider knows to shorten ride or recharge.
 
 ## Deferred items
 

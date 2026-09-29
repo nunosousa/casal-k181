@@ -204,33 +204,53 @@ speedometer and tachometer dial faces.
 - Auto-dim: an ambient light sensor (TSL2591 or a simple photoresistor
   ADC input) provides day/night adaptive brightness.
 
-## 6. Rear lamps, indicators, horn, headlight
+## 6. Vehicle exterior lamps, indicators, horn, headlight
 
-All vehicle exterior lamps driven from this node via low-side N-MOSFETs.
-Long wire runs to rear lamps acceptable — LED current levels are low
-(hundreds of mA at most) so voltage drop over 1-2 m of automotive
-harness wire is negligible.
+All vehicle exterior lamps driven from this node. Per
+[ADR-0005](../project/decisions/0005-retain-incandescent-exterior-lamps.md)
+they are **original-format 12 V incandescent bulbs** in the stock K181
+housings, not LEDs. This drives the following design changes from the
+prior LED-oriented plan:
 
-Outputs (one MOSFET each):
+- **Steady-state currents are ~10× higher** than LED equivalents
+  (~3 A for headlight, ~1.75 A for brake, ~0.8 A per indicator).
+- **Cold-filament inrush** is 5-10× the steady current for a few ms
+  at turn-on.
+- **PWM (if used for dimming)** must be ≥ 1 kHz to avoid filament
+  thermal cycling. Dimming is not a phase-1 feature.
+- **Harness wire gauge** on lamp channels increases to 18-20 AWG.
 
-- Front indicator L
-- Front indicator R
-- Rear indicator L
-- Rear indicator R
-- Rear tail
-- Rear brake
-- Headlight low
-- Headlight high
-- Horn (via a small relay for higher current if a mechanical horn is
-  retained; otherwise direct MOSFET for an electronic horn)
+Drive stage per channel:
 
-Each MOSFET: N-channel logic-level, ~10 A capable (headroom over LED
-loads), TVS on drain for inductive-load protection (relevant to horn).
+| Channel | Drive | Rationale |
+|---|---|---|
+| Headlight low | Automotive relay (Bosch 3057-class), controlled by MCU GPIO via small transistor | 3 A steady + cold inrush best handled by mechanical contact; low duty cycle |
+| Headlight high | Automotive relay | Same as low |
+| Front indicator L / R | N-MOSFET low-side, 10 A / 60 V class (IRLZ44N or STP80NF12) | ~0.8 A steady, ~5 A peak inrush; MOSFET adequate |
+| Rear indicator L / R | Same MOSFET as front indicator | Same |
+| Rear tail | N-MOSFET, 5 A class | ~0.4 A steady; small MOSFET adequate |
+| Rear brake | N-MOSFET, 10 A class | ~1.75 A steady, ~10 A inrush |
+| Horn (mechanical) | Automotive relay | 2-5 A brief; relay tolerates inrush and arcing |
+
+Each MOSFET or relay drive circuit:
+
+- TVS diode on drain / relay-contact side (~24 V clamp).
+- Free-wheel diode across relay coil.
+- Gate driver (small logic-level, driven from MCU GPIO).
+- Optional: current-sense for open-lamp and short-lamp detection
+  (post-phase 1).
 
 Timers:
 
-- Turn-signal blink: TIM4 or software timer, ~1.5 Hz on/off.
-- Hazard: same, but drives both indicators simultaneously.
+- Turn-signal blink: TIM4 or software timer, ~1.5 Hz on/off. This is
+  independent of drive-stage choice.
+- Hazard: same, both indicators simultaneously.
+
+**Load-shedding scope** is bounded by regulation (Portuguese daytime
+headlight requirement). Under low bus/battery voltage, only
+dashboard illumination and (marginally) indicator repetition rate are
+sheddable. Headlight, tail, and brake are always fully driven when
+requested.
 
 ## 7. TPS input
 

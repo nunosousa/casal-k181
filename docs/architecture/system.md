@@ -1,151 +1,125 @@
 # System architecture
 
-Vehicle-level electrical architecture. Details of each node live in
-`ecu.md`, `dashboard.md`, `handlebar-controller.md`, `power.md`, and
-`can-bus.md` (to be written as those subsystems are designed).
+Vehicle-level electrical architecture under the [system concept](../project/system-concept.md),
+[requirements](../project/requirements.md) and [ICD](interfaces.md).
+[ADR-0012](../project/decisions/0012-distributed-dashboard-can-nodes.md)
+defines four intelligent CAN nodes. The PDM is not a CAN node.
 
-## Nodes
+## Nodes and ownership
 
-Two intelligent nodes on the vehicle, plus passive subsystems:
+**ECU**, in a sealed in-frame enclosure:
 
-**ECU** — in-frame, in a sealed aluminium enclosure. Owns:
+- Crank (36-1), front-wheel speed, EGT, CHT, ambient T/P/RH, IMU and power
+  sensing. Twistgrip TPS is received from the warning cluster over CAN.
+- Ignition, future fuel control, exterior-lamp blink/control and charge
+  logic. Physical high-current switching belongs to the PDM, including the
+  coil driver per ADR-0009 (or the selected smart coil).
+- Internal non-volatile session logging, engine/vehicle CAN broadcasts,
+  service USB and internal SWD.
 
-- Crank trigger acquisition (36-1 Hall).
-- Coil driver (external inductive coil, low-side IGBT).
-- Front wheel speed acquisition.
-- EGT, CHT, ambient temp/pressure/humidity, TPS, battery voltage.
-- On-board IMU (6-axis).
-- Data logging to internal non-volatile storage.
-- CAN broadcast of engine and vehicle state.
-- Service USB (single automotive-style connector, hidden but accessible
-  without tools).
-- SWD for PCB-level debugging (internal, short, not routed through the
-  harness).
-- **Vehicle exterior lamp control logic** (per
-  [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)):
-  headlight, tail, brake, front and rear indicators, horn. Blink
-  timing generated locally from steady-state rider-intent bits
-  received over CAN. Physical switching hardware lives in the PDM
-  (see below).
-- **Charge controller logic** — drives PDM charge FETs.
+**Speedometer**, inside its own stock-style enclosure:
 
-**Power Distribution Module (PDM)** — separate hardware enclosure
-adjacent to the ECU (per
-[ADR-0008](../project/decisions/0008-separate-power-distribution-module.md)).
-Passive hardware controlled by the ECU MCU via a short inter-module
-cable. **Not a CAN node.** Owns:
+- One local needle driver and dial illumination.
+- ECU wheel-derived speed display, lifetime odometer and persistence.
+- Its own CAN, power conversion, calibration, health and update endpoint.
 
-- Main fuse, reverse-polarity protection, bus TVS.
-- Supercap bank (ADR-0004 kick-start bootstrap buffer).
-- Battery charging FETs (physical MOSFETs; logic in ECU).
-- Per-lamp blade fuses in ATO holders behind a serviceable cover.
-- Automotive relays in sockets (headlight low, high, horn).
-- Lamp-drive MOSFETs (indicators, tail, brake).
-- Clean 12 V feed to ECU and switched rail to handlebar controller.
-- Vehicle harness connector for all lamp outputs.
+**Tachometer**, inside its separate stock-style enclosure:
 
-**Handlebar controller** — in the headlight nacelle or a small hidden
-enclosure near the handlebar mount. Owns:
+- One local needle driver and dial illumination.
+- ECU-derived RPM display.
+- Its own CAN, power conversion, calibration, health and update endpoint.
 
-- Stepper motor drivers for speedometer and tachometer needles.
-- LED drivers for warning-lamp cluster and gauge illumination.
-- Handlebar switchgear inputs (indicators, horn, headlight, mode buttons).
-- GPS module UART (assumption: module co-located in headlight nacelle).
-- CAN participation: consumer of engine state, producer of GPS state and
-  user-input events.
-- Dashboard indicator-lamp repeater blink (locally timed at ~1.5 Hz;
-  small phase drift from ECU-commanded exterior indicators is
-  acceptable).
+**Warning cluster**, inside its separate stock-style enclosure:
 
-**Passive subsystems:**
+- Warning LEDs and locally timed dashboard indicator repeaters.
+- All remaining dashboard/handlebar functions: switchgear acquisition,
+  twistgrip TPS, GPS UART/PPS and ambient-light sensing.
+- Rider-intent/TPS/GPS broadcasts and shared brightness command; its own
+  CAN, power conversion, calibration, health and update endpoint.
 
-- Speedometer, tachometer, warning-lamp enclosures — stepper motors, LEDs,
-  illumination only. Wired to the handlebar controller.
-- Battery (LiFePO4), regulator/rectifier, fuse box.
-- Ignition coil (external inductive type, driven by ECU).
-- Wiring harness.
+There is no central handlebar controller. See [dashboard controllers](dashboard.md)
+for local hardware and service detail. Peripheral GPS/antenna and sensor
+satellite placement must respect sky view, cable integrity and stock appearance.
 
-## Physical layout (working assumption)
+## Power distribution and passive hardware
 
-    +--------------------+
-    | Headlight nacelle  |
-    |   Handlebar ctrl   |
-    |   GPS module       |
-    +---+------------+---+
-        |            |
-    Switchgear   Dashboard enclosures (speedo, tach, warnings)
-                 (short local wiring)
-        |
-        v (harness down to frame)
-    +--------------------+
-    |    Frame cavity    |
-    |        ECU         |
-    |  Battery, R/R,     |
-    |  fuse box          |
-    +---+------------+---+
-        |            |
-    Engine sensors  Rear lamps
-    Coil driver
+The [PDM](pdm.md) is a separate enclosure adjacent to the ECU:
 
-## Interconnect
+- Main fuse, reverse-polarity and transient protection, supercap bank.
+- Battery charge FETs and sensor returns.
+- Serviceable lamp fuses/relays, exterior-lamp and horn power switching.
+- Coil power driver and sense returns, commanded by ECU timer signals.
+- Protected ECU DC feed and protected switched feeds to all three
+  instrument controllers.
 
-- **CAN bus:** two conductors (CAN-H, CAN-L), twisted pair, 120 Ω
-  termination at each end. Runs from ECU up to the handlebar controller
-  as part of the main harness segment.
-- **Power:** switched +12 V and ground to each node. ECU is directly on
-  battery (with its own switch/fuse); handlebar controller powered via
-  ignition-switched line.
-- **Sensor and actuator wiring:** engine-adjacent sensors run to the ECU;
-  handlebar switchgear and dashboard enclosures wire to the handlebar
-  controller.
+Battery, modern magneto/R/R, external ignition coil, lamps and wiring remain
+external hardware. Instrument enclosures are no longer passive subsystems.
+
+## Interconnect and physical layout
+
+    Frame: stator/RR -- PDM -- protected DC --> ECU
+                        |
+                        +-- protected switched feeds --> three instruments
+
+    CAN trunk: ECU ==== harness ==== speedometer ==== tachometer ==== warning cluster
+                    (short drops / exact physical order to be designed)
+
+The drawing illustrates connectivity, not a released harness route.
+Use a linear twisted-pair CAN trunk, 500 kbit/s classic CAN, with exactly
+two 120-ohm terminations at physical ends. Do not populate termination on
+every instrument or use long star branches. Final instrument ordering and
+endpoint locations are ICD/harness decisions.
+
+Engine sensors wire to ECU; ECU control/sense lines wire to PDM.
+Switchgear, TPS satellite, GPS and ALS wire to the warning cluster.
+Each gauge motor/illumination wires only to its local controller.
 
 ## Data ownership
 
-Single-writer discipline: exactly one node is authoritative for each
-piece of state.
+Exactly one node owns each authoritative state:
 
 | State | Owner | Consumers |
 |---|---|---|
-| RPM | ECU | Handlebar controller (tachometer) |
-| Vehicle speed | ECU (from front wheel Hall) | Handlebar controller (speedometer) |
-| Odometer | Handlebar controller (persisted) | — |
-| EGT, CHT | ECU | Handlebar controller (warning) |
-| Battery voltage | ECU | Handlebar controller (warning) |
-| Coolant / oil pressure | n/a | n/a |
-| Ignition state (running, cranking, off) | ECU | Handlebar controller |
-| Turn signal request (rider intent) | Handlebar controller | ECU (drives blink) |
-| Turn signal exterior lamp state | ECU (locally-generated blink) | — |
-| Turn signal dashboard-repeater state | Handlebar controller (locally-generated blink) | — |
-| Position, altitude, GPS speed | Handlebar controller (from GPS) | ECU (logs) |
-| Ambient temperature / pressure / humidity | ECU | (logs) |
-| Session log | ECU | — |
+| RPM / engine state | ECU | Tachometer, warning cluster |
+| Wheel-derived speed / distance since boot | ECU | Speedometer, warning cluster |
+| Lifetime odometer | Speedometer | Service tools |
+| EGT / CHT / power / ambient / IMU | ECU | Warning cluster as defined in protocol; logs |
+| Twistgrip TPS / rider intent | Warning cluster | ECU |
+| GPS position / speed / UTC / validity | Warning cluster | ECU logs |
+| Exterior lamp phase / commands | ECU | PDM physical switching |
+| Dashboard repeater phase | Warning cluster | Local LEDs |
+| Ambient-light brightness request | Warning cluster | Speedometer, tachometer |
+| Gauge setpoint / illumination / calibration | Each gauge | Local actuator |
+| Session log | ECU | Service tools |
+| Per-node health / firmware identity | Each respective node | ECU/cluster/gauges as defined in protocol |
 
 ## Failure modes and safe states
 
-- **CAN silence from ECU:** handlebar controller freezes gauges at last
-  known value, illuminates a warning lamp. Rider knows to stop.
-- **CAN silence from handlebar controller:** ECU keeps running the
-  engine. Rider notices via dark dashboard.
-- **ECU config-store fault:** boot into hardcoded safe fixed-timing map,
-  illuminate warning via CAN if possible.
-- **Coil-driver fault:** logged; engine cannot run. This is not a
-  soft-failure case.
-- **Battery critical low:** ECU broadcasts warning; handlebar controller
-  shows warning lamp and sheds interior illumination. Exterior lamps
-  (headlight, tail, brake, indicators) are legally required and are
-  not shed. Engine continues to run as long as ECU rail is stable.
-- **Stator under-capacity relative to load** (e.g. rewind not yet done,
-  or degraded): battery slowly drains during running. Warned via CAN.
-  Not immediate emergency; rider knows to shorten ride or recharge.
+- **Missing ECU:** gauges hold last-known needles and indicate stale data
+  via local illumination; cluster independently warns. Exact indication
+  and recovery criteria remain PAR-09.
+- **Missing speedometer or tachometer:** cluster warns for the affected
+  unit; other instruments and engine do not depend on that unit's software.
+- **Missing warning cluster:** gauges continue from ECU data, with usable
+  local brightness fallback. ECU must handle stale rider/TPS inputs;
+  stop-path independence and fallback remain PAR-06/09 release blockers.
+- **Shared bus or power fault:** not equivalent to an isolated node reset.
+  Analyse and test branch protection and bus-fault propagation.
+- **Invalid calibration:** validated applicable ignition/fuel fallback or
+  engine-output inhibition, never assume fixed timing alone recovers injection.
+- **Coil driver fault:** report fault; hardware failure may prevent running.
+- **Low battery/charging deficit:** cluster warns; local instruments may
+  reduce interior illumination without blanking required warnings.
+  Required exterior lighting is not shed.
 
-## Deferred items
+## Deferred extensions
 
-- Immobiliser / keyless start (design open).
-- USB charge port for rider phone (open; likely lives off battery via a
-  small regulator, not on either node).
-- Dashcam integration (out of scope for phase 1).
+- [Phase-9 injection](../project/staged-plan.md): ECU fuel control, hardware
+  allocation, power/kick-start revalidation and safe shutdown before adoption.
+- Immobiliser/keyless start and rider USB charging remain open.
+- Dashcam integration remains outside the first-running baseline.
 
 ## Related
 
-- [ADR-0001: Two-node CAN topology](../project/decisions/0001-two-node-can-topology.md)
-- [ADR-0002: Skip mechanical points](../project/decisions/0002-skip-mechanical-points.md)
+- [Dashboard](dashboard.md), [ECU](ecu.md), [power](power.md)
+- [CAN specification](can-bus.md), [firmware](firmware.md), [HIL](hil.md)

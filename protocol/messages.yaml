@@ -1,12 +1,12 @@
 # Casal K181 vehicle CAN protocol
 #
-# Canonical machine-readable definition. Codegen produces C and Ada
-# headers for both firmware images from this file. Human-readable
+# Canonical machine-readable definition. Planned codegen produces C and Ada
+# headers for all four nodes from this file. Human-readable
 # rationale lives in docs/architecture/can-bus.md.
 
-version: 1
+version: 2
 name: k181-vehicle-can
-description: Two-node vehicle CAN protocol (ECU + handlebar controller)
+description: Four-node vehicle CAN protocol (ECU and three instrument controllers)
 
 bus:
   bitrate: 500000        # bit/s
@@ -18,9 +18,32 @@ nodes:
   - name: ecu
     address: 0x01
     description: Engine control unit
-  - name: handlebar
+  - name: warning_cluster
     address: 0x02
-    description: Handlebar controller / body-control module
+    description: Warning lamps, switchgear, twistgrip TPS, GPS and ambient light
+  - name: speedometer
+    address: 0x03
+    description: Speedometer, odometer and local illumination
+  - name: tachometer
+    address: 0x04
+    description: Tachometer and local illumination
+
+transport:
+  iso_tp:
+    # One active external tool; request/response pair reused by the target's
+    # application service or bootloader, never by two targets.
+    - target: ecu
+      request_id: 0x780
+      response_id: 0x781
+    - target: warning_cluster
+      request_id: 0x782
+      response_id: 0x783
+    - target: speedometer
+      request_id: 0x784
+      response_id: 0x785
+    - target: tachometer
+      request_id: 0x786
+      response_id: 0x787
 
 # Signal encoding conventions:
 #   endian: little (all signals)
@@ -36,7 +59,7 @@ messages:
   - id: 0x010
     name: ecu_emergency_stop
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster, speedometer, tachometer]
     kind: event
     description: ECU is shutting down engine due to critical fault.
     signals:
@@ -55,7 +78,7 @@ messages:
   - id: 0x011
     name: ecu_fault_event
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster]
     kind: event
     description: New fault added to ECU fault log.
     signals:
@@ -76,11 +99,11 @@ messages:
         length_bits: 32
 
   - id: 0x020
-    name: handlebar_emergency_stop
-    producer: handlebar
+    name: warning_cluster_emergency_stop
+    producer: warning_cluster
     consumers: [ecu]
     kind: event
-    description: Handlebar requests engine stop.
+    description: Warning-cluster requests engine stop.
     signals:
       - name: reason
         start_bit: 0
@@ -93,11 +116,11 @@ messages:
           0xFF: user_request
 
   - id: 0x021
-    name: handlebar_fault_event
-    producer: handlebar
+    name: warning_cluster_fault_event
+    producer: warning_cluster
     consumers: [ecu]
     kind: event
-    description: New fault added to handlebar fault log.
+    description: New fault added to warning-cluster fault log.
     signals:
       - name: fault_code
         start_bit: 0
@@ -114,7 +137,7 @@ messages:
   - id: 0x030
     name: session_event
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster, speedometer, tachometer]
     kind: event
     description: Session boundary event (start, stop, sleep, wake).
     signals:
@@ -139,7 +162,7 @@ messages:
   - id: 0x100
     name: engine_state_fast
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster, tachometer]
     kind: periodic
     period_ms: 10
     description: RPM, commanded ignition advance, dwell, running state.
@@ -182,7 +205,7 @@ messages:
   - id: 0x110
     name: vehicle_state_fast
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster, speedometer]
     kind: periodic
     period_ms: 10
     description: Wheel-derived speed and distance.
@@ -209,10 +232,10 @@ messages:
   - id: 0x120
     name: throttle_state
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster]
     kind: periodic
     period_ms: 10
-    description: TPS as observed and used by the ECU (echo of handlebar-produced value).
+    description: TPS as observed and used by the ECU (echo of warning_cluster-produced value).
     signals:
       - name: tps_used_percent
         start_bit: 0
@@ -233,7 +256,7 @@ messages:
   - id: 0x200
     name: thermal_state
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster]
     kind: periodic
     period_ms: 100
     description: EGT, CHT, MCU internal temperature.
@@ -271,7 +294,7 @@ messages:
   - id: 0x210
     name: power_state
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster]
     kind: periodic
     period_ms: 100
     description: Battery, bus voltages; charge current.
@@ -305,7 +328,7 @@ messages:
   - id: 0x220
     name: ignition_diag
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster]
     kind: periodic
     period_ms: 100
     description: Spark diagnostics.
@@ -336,7 +359,7 @@ messages:
   - id: 0x230
     name: ambient_state
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster]
     kind: periodic
     period_ms: 1000
     description: BME280-derived ambient conditions.
@@ -364,7 +387,7 @@ messages:
   - id: 0x240
     name: ecu_heartbeat
     producer: ecu
-    consumers: [handlebar]
+    consumers: [warning_cluster, speedometer, tachometer]
     kind: periodic
     period_ms: 1000
     description: Version and health.
@@ -388,12 +411,12 @@ messages:
         unit: s
 
   # ---------------------------------------------------------------
-  # Handlebar fast periodic (0x300-0x3FF, 100 Hz / 10 ms)
+  # Warning-cluster fast periodic (0x300-0x3FF, 100 Hz / 10 ms)
   # ---------------------------------------------------------------
 
   - id: 0x300
     name: user_input_fast
-    producer: handlebar
+    producer: warning_cluster
     consumers: [ecu]
     kind: periodic
     period_ms: 10
@@ -418,11 +441,11 @@ messages:
 
   - id: 0x310
     name: handlebar_switches
-    producer: handlebar
+    producer: warning_cluster
     consumers: [ecu]
     kind: periodic
     period_ms: 10
-    description: Handlebar switchgear state bits.
+    description: Warning-cluster switchgear state bits.
     signals:
       - name: indicator_left
         start_bit: 0
@@ -466,12 +489,12 @@ messages:
         type: bool
 
   # ---------------------------------------------------------------
-  # Handlebar medium periodic (0x400-0x41F, 5 Hz / 200 ms)
+  # Warning-cluster medium periodic (0x400-0x41F, 5 Hz / 200 ms)
   # ---------------------------------------------------------------
 
   - id: 0x400
     name: gps_position
-    producer: handlebar
+    producer: warning_cluster
     consumers: [ecu]
     kind: periodic
     period_ms: 200
@@ -494,7 +517,7 @@ messages:
 
   - id: 0x410
     name: gps_speed_alt
-    producer: handlebar
+    producer: warning_cluster
     consumers: [ecu]
     kind: periodic
     period_ms: 200
@@ -527,12 +550,12 @@ messages:
         type: bool
 
   # ---------------------------------------------------------------
-  # Handlebar slow periodic (0x420-0x4FF, 1 Hz / 1000 ms)
+  # Warning-cluster slow periodic (0x420-0x4FF, 1 Hz / 1000 ms)
   # ---------------------------------------------------------------
 
   - id: 0x420
     name: gps_fix_state
-    producer: handlebar
+    producer: warning_cluster
     consumers: [ecu]
     kind: periodic
     period_ms: 1000
@@ -562,12 +585,120 @@ messages:
         unit: m
 
   - id: 0x430
-    name: handlebar_heartbeat
-    producer: handlebar
-    consumers: [ecu]
+    name: warning_cluster_heartbeat
+    producer: warning_cluster
+    consumers: [ecu, speedometer, tachometer]
     kind: periodic
     period_ms: 1000
-    description: Version and health of handlebar controller.
+    description: Version and health of warning-cluster controller.
+    signals:
+      - name: fw_major
+        start_bit: 0
+        length_bits: 8
+      - name: fw_minor
+        start_bit: 8
+        length_bits: 8
+      - name: fw_patch
+        start_bit: 16
+        length_bits: 8
+      - name: fault_summary
+        start_bit: 24
+        length_bits: 8
+      - name: uptime_s
+        start_bit: 32
+        length_bits: 32
+        unit: s
+
+  # Shared brightness request (10 Hz)
+  - id: 0x440
+    name: dashboard_brightness
+    producer: warning_cluster
+    consumers: [speedometer, tachometer]
+    kind: periodic
+    period_ms: 100
+    description: Shared dimming request; each gauge applies its local curve and stale-command fallback.
+    signals:
+      - name: brightness_percent
+        start_bit: 0
+        length_bits: 8
+        unit: '%'
+        min: 0
+        max: 100
+      - name: brightness_valid
+        start_bit: 8
+        length_bits: 1
+        type: bool
+
+  - id: 0x022
+    name: speedometer_fault_event
+    producer: speedometer
+    consumers: [ecu, warning_cluster]
+    kind: event
+    description: New fault added to speedometer fault log.
+    signals:
+      - name: fault_code
+        start_bit: 0
+        length_bits: 16
+      - name: severity
+        start_bit: 16
+        length_bits: 4
+        type: enum
+        enum: { 0: info, 1: warning, 2: error, 3: critical }
+      - name: aux_data
+        start_bit: 24
+        length_bits: 32
+
+  - id: 0x023
+    name: tachometer_fault_event
+    producer: tachometer
+    consumers: [ecu, warning_cluster]
+    kind: event
+    description: New fault added to tachometer fault log.
+    signals:
+      - name: fault_code
+        start_bit: 0
+        length_bits: 16
+      - name: severity
+        start_bit: 16
+        length_bits: 4
+        type: enum
+        enum: { 0: info, 1: warning, 2: error, 3: critical }
+      - name: aux_data
+        start_bit: 24
+        length_bits: 32
+
+  - id: 0x500
+    name: speedometer_heartbeat
+    producer: speedometer
+    consumers: [ecu, warning_cluster]
+    kind: periodic
+    period_ms: 1000
+    description: Version and health of speedometer/odometer controller.
+    signals:
+      - name: fw_major
+        start_bit: 0
+        length_bits: 8
+      - name: fw_minor
+        start_bit: 8
+        length_bits: 8
+      - name: fw_patch
+        start_bit: 16
+        length_bits: 8
+      - name: fault_summary
+        start_bit: 24
+        length_bits: 8
+      - name: uptime_s
+        start_bit: 32
+        length_bits: 32
+        unit: s
+
+  - id: 0x600
+    name: tachometer_heartbeat
+    producer: tachometer
+    consumers: [ecu, warning_cluster]
+    kind: periodic
+    period_ms: 1000
+    description: Version and health of tachometer controller.
     signals:
       - name: fw_major
         start_bit: 0
@@ -630,11 +761,11 @@ messages:
         length_bits: 48
 
   - id: 0x702
-    name: diag_request_handlebar
+    name: diag_request_warning_cluster
     producer: any
-    consumers: [handlebar]
+    consumers: [warning_cluster]
     kind: event
-    description: Diagnostic request directed at the handlebar controller.
+    description: Diagnostic request directed at the warning-cluster controller.
     signals:
       - name: service_id
         start_bit: 0
@@ -644,11 +775,11 @@ messages:
         length_bits: 56
 
   - id: 0x703
-    name: diag_response_handlebar
-    producer: handlebar
+    name: diag_response_warning_cluster
+    producer: warning_cluster
     consumers: [any]
     kind: event
-    description: Diagnostic response from the handlebar controller.
+    description: Diagnostic response from the warning-cluster controller.
     signals:
       - name: service_id
         start_bit: 0
@@ -669,9 +800,82 @@ messages:
         length_bits: 48
 
   # ---------------------------------------------------------------
-  # Multi-frame reserved (ISO-TP over these IDs, 0x780-0x781)
+  # Additional instrument diagnostic endpoints
   # ---------------------------------------------------------------
 
-  # 0x780: handlebar -> ECU multi-frame (ISO-TP)
-  # 0x781: ECU -> handlebar multi-frame (ISO-TP)
-  # Not enumerated as fixed messages — payload structure per service.
+  - id: 0x704
+    name: diag_request_speedometer
+    producer: any
+    consumers: [speedometer]
+    kind: event
+    description: Diagnostic request directed at the speedometer.
+    signals:
+      - name: service_id
+        start_bit: 0
+        length_bits: 8
+      - name: payload
+        start_bit: 8
+        length_bits: 56
+
+  - id: 0x705
+    name: diag_response_speedometer
+    producer: speedometer
+    consumers: [any]
+    kind: event
+    description: Diagnostic response from the speedometer.
+    signals:
+      - name: service_id
+        start_bit: 0
+        length_bits: 8
+      - name: status
+        start_bit: 8
+        length_bits: 8
+        type: enum
+        enum: { 0x00: ok, 0x01: not_supported, 0x02: bad_param, 0x03: locked, 0x04: busy, 0xFF: fault }
+      - name: payload
+        start_bit: 16
+        length_bits: 48
+
+  - id: 0x706
+    name: diag_request_tachometer
+    producer: any
+    consumers: [tachometer]
+    kind: event
+    description: Diagnostic request directed at the tachometer.
+    signals:
+      - name: service_id
+        start_bit: 0
+        length_bits: 8
+      - name: payload
+        start_bit: 8
+        length_bits: 56
+
+  - id: 0x707
+    name: diag_response_tachometer
+    producer: tachometer
+    consumers: [any]
+    kind: event
+    description: Diagnostic response from the tachometer.
+    signals:
+      - name: service_id
+        start_bit: 0
+        length_bits: 8
+      - name: status
+        start_bit: 8
+        length_bits: 8
+        type: enum
+        enum: { 0x00: ok, 0x01: not_supported, 0x02: bad_param, 0x03: locked, 0x04: busy, 0xFF: fault }
+      - name: payload
+        start_bit: 16
+        length_bits: 48
+
+  # ---------------------------------------------------------------
+  # Multi-frame reserved (node-specific ISO-TP tool request/response pairs)
+  # ---------------------------------------------------------------
+
+  # 0x780/0x781: tool -> ECU / ECU -> tool
+  # 0x782/0x783: tool -> warning_cluster / warning_cluster -> tool
+  # 0x784/0x785: tool -> speedometer / speedometer -> tool
+  # 0x786/0x787: tool -> tachometer / tachometer -> tool
+  # Same target-specific pair in service and bootloader mode, never two
+  # responders for one target. Not fixed messages: ISO-TP payload per service.

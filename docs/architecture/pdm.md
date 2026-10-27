@@ -31,7 +31,8 @@ Owns:
   logic-level trigger routing only.
 - TVS protection on each output.
 - Clean DC bus feed to the ECU.
-- Switched-rail feed to the handlebar controller.
+- Protected switched-rail branches to speedometer, tachometer and warning
+  cluster, with individual ratings to be established from measurements.
 
 Does not own:
 
@@ -74,7 +75,7 @@ Does not own:
     |     |                                                 |
     |     +--- Dedicated 12 V for coil driver -----> ECU    |
     |     |                                                 |
-    |     +--- Ignition-switched rail out ---> handlebar    |
+    |     +--- Switched protected feeds ---> instruments   |
     |     |                                                 |
     |     +--- Lamp fuse bank (blade holders):              |
     |            HL-low, HL-high, tail+brake,               |
@@ -244,6 +245,10 @@ selection phase.
 
 ## 6. Thermal budget
 
+The following legacy estimates require revalidation with all three
+instrument feeds, their protection devices and measured homing/steady loads
+under ADR-0012; they are not a released four-node thermal budget.
+
 Dominant contributors at cruise (headlight on, 4 A load):
 
 - MOSFETs (lamp drive, ~6 outputs actively conducting): ~2 W
@@ -285,7 +290,7 @@ serviceable cover.
 - **Failed relay:** loss of headlight or horn. Detected by absence
   of expected current on sense (if instrumented).
 - **Failed charge FET (charge stuck on):** battery over-charged;
-  BMS trips off, warned by handlebar via ECU CAN.
+  BMS trips off, warned by warning cluster via ECU CAN.
 - **Failed reverse-polarity P-FET:** silent (worst case). Failure
   mode is protection loss, not immediate malfunction.
 - **Supercap failure (open):** kick-start bootstrap fails; running
@@ -293,7 +298,7 @@ serviceable cover.
 - **Supercap failure (shorted):** dead-short on DC bus at boot,
   blows main fuse.
 - **Control-cable disconnect:** ECU loses control of all lamps and
-  charging. Handlebar warning based on absent CAN sense-return
+  charging. Warning-cluster warning based on absent CAN sense-return
   feedback (post-phase 1 detection).
 
 ## 9. Interaction with the ECU

@@ -3,7 +3,7 @@
 Physical design and installation of the front-wheel speed target ring
 and Hall sensor bracket. Referenced by
 [ECU §5.2](../architecture/ecu.md) and used for both real-time
-display (via CAN to the handlebar's speedometer) and coastdown /
+display (via CAN to the independent speedometer controller) and coastdown /
 acceleration analysis (see [measurement plan §3](../measurement-plan.md)).
 
 ## 1. Design objectives

@@ -1,17 +1,25 @@
 # Firmware architecture
 
-Cross-cutting firmware architecture for both nodes. Covers application
+Cross-cutting firmware architecture for all four nodes. Covers application
 partition, language choices, RTOS approach, flash layout, bootloader
 design, task decomposition, config and log storage, build system,
 testing, and firmware update flow.
+
+This is the project's Software Architecture Description (SAD).
+Normative software behaviour is allocated in the
+[requirements register](../project/requirements.md); cross-image, hardware
+and service contracts are indexed by the [ICD](interfaces.md).
+Memory partitions, MCU selection and some ownership descriptions remain
+provisional pending the [backlog](../project/backlog.md) reviews.
 
 Constrained by:
 
 - [ADR-0002: Skip mechanical points](../project/decisions/0002-skip-mechanical-points.md)
 - [ADR-0003: MCU family selection](../project/decisions/0003-mcu-family-selection.md)
 - [ADR-0004: Kick-start with flat battery](../project/decisions/0004-kick-start-flat-battery.md)
+- [ADR-0012: Distributed dashboard CAN nodes](../project/decisions/0012-distributed-dashboard-can-nodes.md)
 - [ECU subsystem](ecu.md)
-- [Handlebar controller subsystem](handlebar-controller.md)
+- [Dashboard controller subsystems](dashboard.md)
 - [CAN bus](can-bus.md)
 
 ## 1. Scope
@@ -36,18 +44,21 @@ define:
   update, bulk log download, extended calibration. Entered from the
   bootloader when requested; not resident during normal operation.
 
-**Handlebar controller** — two firmware images:
+**Each instrument controller** — two firmware images per node:
 
 - **Bootloader** (C). Same pattern as ECU bootloader plus a small CAN-
-  based firmware-update protocol (there is no USB on this node).
-- **Application** (Ada). Everything: gauge drive, switchgear, lamps,
-  GPS, TPS, CAN, diagnostic responder.
+  based firmware-update protocol (no USB on the instrument nodes).
+- **Application** (Ada). Speedometer: one gauge, illumination and odometer;
+  tachometer: one gauge and illumination; warning cluster: warning LEDs,
+  switchgear, TPS, GPS, ambient-light sensing and brightness broadcast.
+  All implement their own CAN, diagnostics, configuration and health.
 
-Total: five firmware images across two nodes.
+Total: nine logical firmware images across four nodes. Shared instrument
+source is encouraged; images and updates must retain a checked target role.
 
 ### 2.1 Language rationale
 
-**Ada for engine control and vehicle logic.** Both nodes run Ada
+**Ada for engine control and vehicle logic.** All four nodes run Ada
 applications for their main runtime, using the **Ravenscar** tasking
 profile on GNAT bare-metal. Ravenscar's task model, protected objects
 with single-entry semantics, ceiling-priority protocol, and freedom
@@ -83,7 +94,12 @@ via reset-vector redirection, not linker-level unification.
 
 Sum: 992 KB. 32 KB reserved for future.
 
-### 3.2 Handlebar controller (STM32G474RE, 512 KB internal flash)
+### 3.2 Instrument controllers (STM32G4-class candidates)
+
+The former G474 512 KB layout below is a provisional per-instrument budget,
+not a validated allocation or a commitment to fit the same chip in every
+housing. Verify exact flash erase units, Ada runtime and bootloader sizing
+for each selected part before release.
 
 | Region | Size | Contents |
 |---|---|---|
@@ -97,8 +113,9 @@ Sum: 496 KB. 16 KB reserved.
 ### 3.3 External storage
 
 - **ECU:** 128 MB SPI NAND (W25N01GV) — log data only, see §7.
-- **Handlebar:** 2 MB SPI NOR (W25Q16JV) — odometer + redundant copy +
-  fault log, see §8.
+- **Speedometer:** SPI NOR (W25Q16JV-class candidate) for odometer +
+  redundant copy and fault log. Cluster/tachometer bulk external storage
+  is not assumed necessary; size their configuration/fault stores separately.
 
 ## 4. Bootloader design
 
@@ -110,7 +127,7 @@ Sum: 496 KB. 16 KB reserved.
 - Jump to the target application.
 - On any integrity failure or three consecutive boot failures on a
   freshly-updated slot: fall back to the other slot (ECU) or to
-  loader-mode (handlebar).
+  CAN recovery mode (each instrument).
 
 ### 4.2 Boot flow (ECU)
 
@@ -164,12 +181,12 @@ The signature check (ECDSA/Ed25519 verify) is **not** in the cold-boot
 path. It runs exactly once, on the first boot after a slot update,
 after which the slot is marked "verified" in the config store.
 
-### 4.4 Boot flow (handlebar controller)
+### 4.4 Boot flow (instrument controllers)
 
 Similar, but the fallback on all-slots-fail is to enter a small
 CAN-based firmware-update mode inside the bootloader itself. This is
-the only way the handlebar can be recovered without opening the
-enclosure (no USB).
+the recovery path for each instrument without opening its enclosure (no
+USB). Only the selected target answers its service/update transport IDs.
 
 ### 4.5 Bootloader-application interface
 
@@ -276,7 +293,7 @@ If the config store is unreadable at boot, or the map integrity CRC
 fails, the riding app boots with a **hardcoded safe map**: a
 conservative single fixed advance value (e.g. 15° BTDC) compiled into
 the image. Vehicle remains rideable, warning lamp illuminated via
-handlebar controller.
+warning-cluster controller.
 
 ## 7. Log store (ECU)
 
@@ -332,8 +349,8 @@ schemas.
 
 ## 8. Config store
 
-Log-structured key-value store on internal MCU flash. Same design on
-both nodes.
+Log-structured key-value store on internal MCU flash. Shared design with
+independent stores on all four nodes.
 
 Keys are enumerated at compile time — no dynamic key sets. Values are
 typed: uint8, uint16, uint32, int32, float32, blob (bounded size).
@@ -346,13 +363,14 @@ Sector layout:
 - Sector full or wear count exceeded: compact live values to next
   sector, erase old.
 
-Committed values on both nodes include:
+Proposed stored values by node include:
 
 **ECU:**
 
 - Ignition timing (single value in phase 1; extended to map in phase 4+).
 - Crank angle sync offset (calibration).
-- TPS calibration (idle-position degrees, full-open degrees).
+- Consumed calibration identity/validity for CAN-derived TPS; physical
+  TPS idle/full-open calibration belongs to the warning cluster.
 - Thermocouple cold-junction offset per channel.
 - Battery divider ratios.
 - Vehicle-frame IMU rotation matrix.
@@ -360,44 +378,57 @@ Committed values on both nodes include:
 - Boot-healthy counter.
 - Fault log (recent entries).
 
-**Handlebar:**
+**Speedometer and tachometer, each locally:**
 
-- Gauge zero-position offsets (per stepper).
+- Gauge zero-position offset for its one stepper.
 - Gauge full-scale values (RPM at full-scale tach; m/s at full-scale
   speedo).
 - Illumination default level and auto-dim curve parameters.
 - Slot preference and verified flags.
 - Fault log.
-- Odometer counter (mirrored in external W25Q16, with the internal
-  copy as a checksum verifier).
+- Speedometer only: persistent odometer and redundant recovery state.
+  Counter reconciliation on ECU restart/wrap and power loss is PAR-10/11.
 
-## 9. Handlebar application
+**Warning cluster:**
 
-Ada, Ravenscar. Mirror pattern to the ECU riding app but simpler.
+- TPS idle/full-open calibration and validity.
+- Switch debounce configuration, LED thresholds, ALS/dimming curve.
+- GPS configuration, slot preference/verified flags and fault log.
 
-Tasks:
+## 9. Instrument applications
 
-| Task | Priority | Period / trigger | Responsibility |
+Ada, Ravenscar. Reuse shared services, but instantiate only tasks and
+peripherals required by each node. A gauge never needs cluster sensor
+tasks just because the sources are shared.
+
+| Task | Nodes | Period / trigger | Responsibility |
 |---|---|---|---|
-| CAN_Rx_Task | High | Event | Dispatch engine-state frames to needle setpoints |
-| CAN_Tx_Task | Medium | Multi-rate | Emit periodic user-input, GPS, heartbeat frames |
-| Needle_Task | High | 5 ms | Sinusoidal PWM update for both stepper motors |
-| Switch_Task | Medium | 10 ms | Debounce switches; broadcast state via CAN_Tx |
-| Lamp_Task | Medium | Event / 10 Hz | Turn-signal blink, hazard, warning-lamp state |
-| TPS_Task | Medium | 10 ms | I2C read AS5600; broadcast |
-| GPS_Task | Low | Event (UART Rx) | Parse NMEA/UBX; broadcast at 5 Hz / 1 Hz |
-| ALS_Task | Lowest | 1 s | Ambient light sensor; adjust illumination PWM |
-| Housekeeping_Task | Lowest | 1 s | Watchdog, odometer persist, config maintenance |
+| CAN_Rx_Task | All instruments | Event | Dispatch owned data, diagnostics and peer freshness |
+| CAN_Tx_Task | All instruments | Multi-rate | Own heartbeat/fault events and role-specific frames |
+| Needle_Task | Speedometer, tachometer | 5 ms candidate | Update one local motor from ECU speed or RPM |
+| Odometer_Task | Speedometer | Data arrival / persistence schedule TBD | Reconcile distance, retain counter safely |
+| Switch_Task | Warning cluster | 10 ms | Debounce rider inputs and broadcast intent |
+| Lamp_Task | Warning cluster | Event / local timer | Warning LEDs and local repeaters |
+| TPS_Task | Warning cluster | 10 ms | Acquire AS5600, validate and publish |
+| GPS_Task | Warning cluster | UART Rx | Parse NMEA/UBX; publish at 5 Hz / 1 Hz |
+| ALS_Task | Warning cluster | 1 s candidate | Acquire light and calculate shared brightness |
+| Illumination_Task | All instruments | Request/local timer | Apply local curve and stale-command fallback |
+| Housekeeping_Task | All instruments | 1 s candidate | Watchdog, configuration and health maintenance |
+
+Final priorities and worst-case bounds require PAR-09/12 analysis. Each
+instrument boots, resets and updates independently. Loss of one gauge
+must not suspend another's needle task. Stale ECU data is indicated locally
+by each gauge; warning-cluster availability is not a substitute for that.
 
 ## 10. Shared modules
 
-Code shared between the ECU riding app and the handlebar app:
+Code shared between the ECU riding app and all instrument apps:
 
 - **Protocol** — CAN message struct definitions, encoders, decoders.
   Generated from `protocol/messages.yaml` by `tools/protocol-gen/`.
 - **Common types** — engineering-unit types (RPM, temperature, angle,
   m/s), scaled integer helpers, endian conversions.
-- **Config store** — LSKV implementation, same code on both nodes.
+- **Config store** — LSKV implementation, same code with per-node allocation.
 - **Fault log** — persistent circular buffer format.
 - **Ravenscar startup** — shared minimal runtime configuration.
 
@@ -425,7 +456,7 @@ build burden).
 
 Top-level orchestration via **Makefile** at repo root. Sub-builds:
 
-- Ada images (bootloader-adjacent runtimes, riding app, handlebar app)
+- Ada images (bootloader-adjacent runtimes, riding app, instrument apps)
   built via **Alire** (`alr build`) which invokes gprbuild.
 - C images (bootloaders, ECU loader app) built via **cmake** invoking
   the ARM GNU toolchain.
@@ -434,13 +465,16 @@ Top-level targets:
 
     make protocol       # regenerate protocol code
     make ecu            # bootloader + loader + riding app
-    make handlebar      # bootloader + app
-    make all            # both nodes
+    make speedometer    # node bootloader + app
+    make tachometer     # node bootloader + app
+    make warning-cluster # node bootloader + app
+    make all            # all four nodes
     make test           # host-side unit tests
     make hil            # host-side HIL harness build
     make clean          # everything
 
-Individual images buildable via subdirectory targets for iteration.
+These targets/build tools are planned, not currently implemented.
+Individual images will be buildable via subdirectory targets for iteration.
 
 ## 13. Testing strategy
 
@@ -468,10 +502,10 @@ reported via UART.
   crank Hall.
 - Dummy coil (or oscilloscope + resistor bank) receiving coil drive.
 - Bench PSU and current shunt for power measurement.
-- USB-CAN dongle emulating the handlebar controller.
+- USB-CAN dongle emulating each of the three instruments independently.
 - Log-file playback tool for regression against captured sessions.
 
-Details in a future `docs/architecture/hil.md`.
+Details in [HIL architecture](hil.md).
 
 **On-vehicle** as final validation.
 
@@ -495,22 +529,24 @@ Details in a future `docs/architecture/hil.md`.
 11. If step 10 fails (crash before flag set): bootloader detects
     unhealthy boot on next cold-boot, reverts to old slot.
 
-### 14.2 Handlebar update via CAN
+### 14.2 Instrument update via CAN
 
-1. Host tool sends `diag_request_handlebar` service `0xF0` over CAN.
-2. Handlebar app writes `BOOT_REQ_UPDATE_CAN` magic word, resets.
-3. Handlebar bootloader enters CAN-update mode.
-4. Host tool sends image in fixed-size chunks over ISO-TP-framed CAN.
-5. Handlebar bootloader writes to inactive slot, verifies CRC + sig.
+1. Host selects a node and its diagnostic endpoint (cluster 0x702,
+   speedometer 0x704 or tachometer 0x706), then sends service `0xF0`.
+2. Selected app writes `BOOT_REQ_UPDATE_CAN` magic word and resets.
+3. Only that node's bootloader enters CAN-update mode.
+4. Host sends an image over that target's ISO-TP pair from the CAN spec.
+5. Bootloader checks target role, image format, CRC/signature and writes
+   the inactive slot; exact transactional sequence is PAR-11 work.
 6. Slot preference updated in config store.
 7. Reset into new application.
 
 ### 14.3 Update via ECU-as-CAN-bridge
 
-For convenience, the host tool can update the handlebar via the ECU's
-USB service connector: the loader app relays ISO-TP chunks to the
-handlebar bootloader over CAN. Same protocol on the handlebar side;
-different transport on the host side.
+For convenience, the host tool can update any selected instrument via the
+ECU USB service connector. The loader relays the selected target's ISO-TP
+exchange without impersonating another node or resetting the other gauges.
+Single active service-master ownership must be enforced.
 
 ## 15. Directory layout
 
@@ -540,12 +576,19 @@ different transport on the host side.
         gnat/
         ecu_riding.gpr
         alire.toml
-      handlebar-bootloader/   # C
+      instrument-bootloader/ # C, target-role configurations
         ...
-      handlebar-app/          # Ada
+      speedometer-app/        # Ada
         src/
         gnat/
-        handlebar.gpr
+        speedometer.gpr
+        alire.toml
+      tachometer-app/         # Ada
+        ...
+      warning-cluster-app/    # Ada
+        src/
+        gnat/
+        warning_cluster.gpr
         alire.toml
     tools/
       protocol-gen/           # Python
@@ -564,7 +607,7 @@ different transport on the host side.
 - **Ada tasking profile** — Ravenscar vs Jorvik (Ravenscar++).
   Jorvik permits multiple entries and other conveniences at some
   analysability cost. Ravenscar preferred for the ECU; Jorvik
-  potentially fine for the handlebar. Confirm during first-code
+  potentially fine for instrument apps. Confirm during first-code
   bring-up.
 - **Log format vs MCAP-on-device** — custom binary appended, converted
   offline (chosen), vs writing MCAP directly on device (rejected for
@@ -577,7 +620,7 @@ different transport on the host side.
 ## 17. Related
 
 - [ECU subsystem](ecu.md)
-- [Handlebar controller](handlebar-controller.md)
+- [Dashboard controllers](dashboard.md)
 - [CAN bus](can-bus.md)
-- HIL — to be written
+- [HIL](hil.md)
 - [Measurement plan](../measurement-plan.md)

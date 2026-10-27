@@ -3,6 +3,11 @@
 **Status:** Accepted (physical drive location subsequently refined by [ADR-0008](0008-separate-power-distribution-module.md); logic-ownership decision stands)
 **Date:** 2026-09-29
 
+**Later topology:** [ADR-0012](0012-distributed-dashboard-can-nodes.md)
+replaces the central handlebar controller with three local instrument
+controllers. Its shared input/repeater duties move to the warning cluster;
+ECU exterior-control ownership remains unchanged.
+
 ## Context
 
 [ADR-0001](0001-two-node-can-topology.md) placed all vehicle exterior

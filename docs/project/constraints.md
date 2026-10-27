@@ -6,7 +6,11 @@ what the project *is*.
 
 ## Engine architecture
 
-- **Carburettor-based induction.** No fuel injection at any phase.
+- **Carburettor baseline, optional throttle-body fuel injection.** Initial
+  running and ignition development retain a carburettor. Later exploration
+  may replace it with a throttle body and electronically controlled
+  injector, using sensors and ECU calibration to control fuel delivery
+  (see [ADR-0010](decisions/0010-throttle-body-fuel-injection.md)).
 - **No reed-valve conversion.** Piston-port induction retained.
 - **No cylinder porting modifications.** Port geometry as delivered by the
   Eurocilindro kit is accepted as-is. Head, squish geometry, ignition,
@@ -40,14 +44,20 @@ what the project *is*.
   no visible aftermarket displays. Service access hidden under panels.
 - Original dial faces (or credible reproductions) preferred on dashboard
   gauges, driven by modern electronics behind the panel.
+- Speedometer/odometer, tachometer and warning lamps retain separate
+  stock-style enclosures, each containing its own CAN controller. No
+  central handlebar controller; remaining dashboard/handlebar functions
+  belong to the warning-cluster unit per
+  [ADR-0012](decisions/0012-distributed-dashboard-can-nodes.md).
 
 ## Committed hardware
 
 - **Eurocilindro NOS 44 mm bore kit** — ~60 cc, adopted as the top-end.
 - **NOS 5-speed gearbox** — adopted as the transmission.
-- **Original carburettor and points-derived ignition components retained**
-  only until the ECU is ready. First engine run is with ECU-controlled
-  fixed-timing ignition (see [staged plan](staged-plan.md)).
+- **Original carburettor retained for the first running baseline.**
+  Carburettor optimisation precedes any fuel-injection experiment. Mechanical
+  points are skipped; first engine run is with ECU-controlled fixed-timing
+  ignition (see [staged plan](staged-plan.md)).
 
 ## Intended use
 
@@ -57,10 +67,16 @@ what the project *is*.
   conformal coating, and non-consumer-grade internal storage.
 - Must never leave the rider stranded due to a soft failure in the ECU.
   Boot into a safe fixed-timing map on any config-store or map fault.
+  Any injected configuration must also have a validated fuel-calibration
+  fallback; fixed ignition timing alone cannot recover lost fuel control.
 
 ## Process
 
 - Hobby project. No certified-automotive or aerospace process burden.
+- Use the [lightweight engineering framework](engineering.md) for identified
+  requirements, interface control, hazard review and verification evidence
+  (see [ADR-0011](decisions/0011-lightweight-engineering-documentation.md)).
+  Documentation discipline does not introduce certification obligations.
 - One variable at a time, wherever possible. Every subsystem change is
   characterised against a preserved baseline dataset.
 - All architectural decisions of consequence recorded as ADRs under

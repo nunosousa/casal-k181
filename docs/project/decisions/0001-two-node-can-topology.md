@@ -1,9 +1,12 @@
 # ADR-0001: Two-node CAN topology (ECU + handlebar controller)
 
-**Status:** Accepted (lamp-drive ownership refined by [ADR-0007](0007-lamp-drive-moves-to-ecu.md))
+**Status:** Superseded by [ADR-0012](0012-distributed-dashboard-can-nodes.md)
 **Date:** 2026-09-28
 
 ## Context
+
+Historical decision retained for rationale. The current topology has an ECU
+and three independent instrument CAN nodes, not a central handlebar controller.
 
 The project modernises the entire vehicle electrical system, not only the
 engine management. Beyond the ECU, the vehicle has:

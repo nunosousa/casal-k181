@@ -3,6 +3,11 @@
 **Status:** Accepted (coil-driver location subsequently refined by [ADR-0009](0009-coil-driver-in-pdm.md))
 **Date:** 2026-09-29
 
+**Later topology:** [ADR-0012](0012-distributed-dashboard-can-nodes.md)
+replaces the single handlebar load with three independently controlled
+instrument nodes. PDM remains passive and supplies their protected switched
+feeds; historical two-node references below are superseded.
+
 ## Context
 
 [ADR-0007](0007-lamp-drive-moves-to-ecu.md) moved the exterior lamp

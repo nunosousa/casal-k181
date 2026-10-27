@@ -3,6 +3,12 @@
 **Status:** Accepted
 **Date:** 2026-09-29
 
+**Later allocation:** [ADR-0012](0012-distributed-dashboard-can-nodes.md)
+makes the three instrument enclosures active CAN nodes. Lamp technology
+remains unchanged; exterior control logic is ECU-owned and power switching
+is PDM-owned under ADR-0007/0008. References below to a central handlebar
+controller/passive dashboard describe the historical allocation.
+
 ## Context
 
 Earlier project scoping assumed LED lamps for all vehicle exterior

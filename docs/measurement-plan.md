@@ -1,5 +1,11 @@
 # Measurement plan
 
+Experimental methodology under the [engineering framework](project/engineering.md).
+Use the [system concept](project/system-concept.md) for hypotheses and the
+[V&V plan](project/verification-plan.md) for requirement verification and
+engine/riding gates. Measurement uncertainty targets are not automatically
+maximum allowable control errors.
+
 Primary methodology document. Defines what is measured, how, with what
 accuracy, and under what conditions. Every experiment in
 `docs/experiments/` references sections here.
@@ -38,6 +44,15 @@ End-quantities produced at each staged milestone.
   against a fixed end-quantity set; success criterion is whether the
   per-cycle Δω signal carries usable information about load,
   combustion phasing or misfire.
+- **Phase 9 (throttle-body fuel injection):** compare the phase-3 quantity
+  set against the last characterised carburettor configuration with
+  ignition calibration and engine hardware held constant. Also record
+  cold/hot starting, idle stability, throttle response and warm-up
+  behaviour. Preserve fuel-map versions, sensor calibrations, injector
+  pulse width/duty cycle, fuel pressure and supply voltage alongside
+  RPM, throttle, EGT and CHT so fuelling changes are reproducible.
+  Complete bench/HIL fault and shutdown checks before controlled engine
+  tests, and controlled engine tests before road characterisation.
 
 ## 3. Test protocols
 
@@ -224,10 +239,10 @@ marked pre/post any change plausibly affecting fuel consumption
 | EGT | K-type + weld-in bung, ~50 mm from exhaust port | 5 Hz | MAX31855, on-chip cold-junction |
 | CHT | Plug-washer thermocouple or head-fin thermistor | 1 Hz | MAX31855 (K-type) unified with EGT if thermocouple used |
 | Ambient T / P / RH | BME280 | 1 Hz | In cool airflow, vented port on ECU enclosure |
-| Throttle position | AS5600 magnetic rotary at twistgrip | 100 Hz | Commanded, not slide position |
+| Throttle position | AS5600 magnetic rotary at twistgrip via warning-cluster CAN | 100 Hz | Commanded, not slide position; log validity/receive age |
 | Battery voltage | Divider on ECU | 10 Hz | |
 | Bus voltage | Divider on ECU | 10 Hz | |
-| GPS | u-blox NEO-M9N class, active antenna | 5 Hz position, 1 Hz fix state | Wired to handlebar controller |
+| GPS | u-blox NEO-M9N class, active antenna | 5 Hz position, 1 Hz fix state | Wired to warning-cluster controller |
 | IMU | ICM-42688 or equivalent, on ECU PCB | 200 Hz | 6-axis |
 | Ignition primary | On-driver sense of coil-drive V and I | 100 kHz windowed, event-triggered | ~2 ms per spark event |
 
@@ -245,9 +260,16 @@ marked pre/post any change plausibly affecting fuel consumption
 ### 4.3 Deferred sensors
 
 - Wideband lambda — deferred beyond phase 4; two-stroke exhaust
-  contamination shortens sensor life.
+  contamination shortens sensor life. Evaluate for phase-9 calibration,
+  accounting for scavenged oxygen as well as oil contamination; do not
+  use lambda alone to infer trapped mixture strength.
 - MAP — deferred; unclear value on a naturally aspirated piston-port
-  two-stroke.
+  two-stroke. Evaluate signal usefulness against RPM/TPS-based load
+  estimation for phase 9.
+- Injection-specific sensing — select actual throttle-body position,
+  intake-air/engine temperature and fuel-pressure instrumentation during
+  phase-9 design; existing twistgrip and ambient sensors are not assumed
+  adequate for fuel control.
 - On-bike anemometer — deferred; handheld sufficient for phase 1.
 
 ## 5. Ambient and condition logging
@@ -289,7 +311,8 @@ Custom binary append-only, written to the ECU's SPI NAND. Details in
 
 - **Session header** at start of each session: session ID, start-of-
   session wall clock (from GPS if available, otherwise last-known),
-  ECU FW version, handlebar FW version, channel table (name, type,
+  ECU, speedometer, tachometer and warning-cluster FW versions and node
+  availability, channel table (name, type,
   scale, offset, unit, rate), session-metadata YAML blob.
 - **Record blocks** of one NAND erase-block each: sequence number,
   record stream, trailer CRC.

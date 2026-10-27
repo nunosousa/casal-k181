@@ -1,7 +1,13 @@
 # HIL bench architecture
 
-Hardware-in-the-loop bench for validating the ECU (and handlebar
-controller) firmware and hardware before first engine start.
+Procedure candidates and rig design supporting the
+[V&V plan](../project/verification-plan.md). The V&V register owns planned
+versus executed status; requirement IDs and open acceptance limits live in
+the [requirements](../project/requirements.md). Test names below do not
+constitute verification evidence.
+
+Hardware-in-the-loop bench for validating ECU/PDM and the three instrument
+controllers before first engine start and subsequent dashboard integration.
 
 Phase 2 of the [staged plan](../project/staged-plan.md) is not
 complete until the HIL bench has validated the full ignition path
@@ -153,7 +159,7 @@ controller:
   realistic, less flexible.
 - **TPS**: a physical AS5600 on the emulator board with a small
   servo or manual knob for angle. The ECU's Vehicle-Bus receives TPS
-  over CAN from the handlebar or a stand-in.
+  over CAN from the warning cluster or a stand-in.
 - **Wheel speed**: HIL controller PWM output driving a level-shifted
   logic signal into the ECU's wheel-Hall input pin, generating a
   square wave at whatever frequency corresponds to the target vehicle
@@ -167,9 +173,11 @@ controller:
 
 - **USB-CAN dongle** — CANable or Peak PCAN-USB. Talks to the CAN
   bus at 500 kbit/s.
-- Represents the handlebar controller during ECU bring-up, generating
+- Represents the warning-cluster controller during ECU bring-up, generating
   synthetic user-input frames per `messages.yaml`. Later replaced by
-  the real handlebar controller when that node is ready.
+  the real warning-cluster controller when that node is ready. Also emulate
+  speedometer/tachometer heartbeats, diagnostics and independent dropouts.
+  The bus still has exactly two physical terminations.
 - Terminated at 120 Ω on the dongle side; ECU has its own 120 Ω on the
   other end.
 - Python `python-can` bindings on the host drive it.
@@ -368,13 +376,13 @@ candidate is promoted.
   di/dt. Keep scope probes short; ground scope and PSU to the same
   reference; avoid ground loops.
 
-## 8. Handlebar controller HIL variant
+## 8. Distributed instrument HIL variant
 
 Small separate bench, simpler:
 
-- Two real stepper motors + gauges (or LED indicator strips for phase
-  1 while dial faces are sourced).
-- Warning-lamp LEDs on a small panel.
+- Speedometer and tachometer, each with its own MCU, transceiver, local
+  power conversion, real stepper and illumination.
+- Warning-cluster node with its own MCU, transceiver and LED panel.
 - Physical switch panel (indicator L/R, hazard, horn, headlight, kill,
   mode buttons).
 - Real AS5600 on a knobbed shaft.
@@ -384,13 +392,21 @@ Small separate bench, simpler:
 - GPS: either the real module with a small active antenna and sky
   view via a window, or a UART GPS simulator on the HIL controller.
 
-Test cases mirror the ECU set but focused on the handlebar's
-responsibilities: gauge accuracy (commanded vs. observed needle
-angle), switch debounce, GPS parsing correctness, dashboard
-indicator-repeater blink timing.
+Test cases cover each gauge's accuracy, homing and local illumination;
+speedometer odometer reconciliation/persistence; and cluster switch debounce,
+TPS validity, GPS parsing, ALS/shared brightness and local repeater blink.
+Address each instrument independently for diagnostic/update tests.
+
+Reset/disconnect/update one instrument at a time: verify the engine and
+other instruments continue, the cluster reports missing gauges and stale
+cluster inputs are handled explicitly. Drop ECU heartbeat/data separately:
+verify local stale indication on both gauges and independent cluster warning.
+Drop brightness while ECU telemetry continues: gauges must remain usable.
+Test shared-bus/rail faults separately from isolated node reset. Measure
+four-node bus load and verify only two end terminations. See VER-013/014/016.
 
 **Incandescent exterior-lamp load testing is on the ECU HIL rig**,
-not here — see [§6.7](#67-lamp-drive) below, added per
+not here — see [ECU + PDM lamp-drive testing](#8a-ecu--pdm-lamp-drive-testing), added per
 [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md).
 
 ## 8a. ECU + PDM lamp-drive testing
@@ -468,7 +484,8 @@ equipment:
 | **Total (no PSU)** | **~235** |
 | **Total (with PSU)** | **~435** |
 
-Handlebar HIL variant: additional ~€80 for stepper drivers, panel,
+Distributed instrument HIL variant: re-estimate cost for three controllers,
+three transceivers and local supplies as well as stepper drivers, panel,
 GPS simulator or module.
 
 ## 11. Open questions

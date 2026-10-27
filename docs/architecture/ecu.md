@@ -10,10 +10,11 @@ the hardware design when it happens.
 
 Design is constrained by:
 
-- [ADR-0001: Two-node CAN topology](../project/decisions/0001-two-node-can-topology.md)
+- [ADR-0012: Distributed dashboard CAN nodes](../project/decisions/0012-distributed-dashboard-can-nodes.md)
 - [ADR-0002: Skip mechanical points](../project/decisions/0002-skip-mechanical-points.md)
 - [ADR-0003: MCU family selection](../project/decisions/0003-mcu-family-selection.md)
 - [ADR-0004: Kick-start with flat battery](../project/decisions/0004-kick-start-flat-battery.md)
+- [ADR-0010: Explore throttle-body fuel injection](../project/decisions/0010-throttle-body-fuel-injection.md)
 - [Power architecture](power.md)
 - [Measurement plan](../measurement-plan.md)
 
@@ -29,7 +30,7 @@ Owns:
   switches the coil primary; sense returns routed back to the ECU.
 - Front wheel speed acquisition.
 - EGT, CHT thermocouple acquisition.
-- TPS (contactless twistgrip sensor).
+- CAN-derived TPS from the warning cluster's contactless twistgrip sensor.
 - Ambient temperature, pressure, humidity (BME280).
 - IMU (6-axis, ICM-42688).
 - Battery and DC bus voltage sensing.
@@ -41,18 +42,34 @@ Owns:
 - **Vehicle exterior lamp drive** (per
   [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)):
   headlight (low + high, via relay), tail, brake, front and rear
-  indicators, horn (via relay). Per-lamp fuses on-board.
+  indicators, horn (via relay). Per-lamp fuses and switching in the PDM.
 - **Turn-signal blink timing** — locally generated at ~1.5 Hz from
   the steady-state rider-intent bits in `handlebar_switches`.
 - SWD debug (internal, not routed off the PCB).
 
 Does not own:
 
-- Speedometer/tachometer display drive — handlebar controller.
-- Dashboard warning lamps — handlebar controller.
-- Dashboard indicator repeater blink — handlebar controller (blinked
+- Speedometer/tachometer display drive — their respective local controllers.
+- Dashboard warning lamps — warning-cluster controller.
+- Dashboard indicator repeater blink — warning-cluster controller (blinked
   locally, small phase drift from exterior indicators acceptable).
-- GPS — handlebar controller (re-broadcast on CAN).
+- GPS — warning-cluster controller (re-broadcast on CAN).
+
+### Planned extension: throttle-body fuel injection
+
+[Phase 9](../project/staged-plan.md) explores ECU-controlled injection in
+place of the carburettor. The ECU would own injector scheduling, fuel
+calibration, sensor compensation and fuel-system fault handling. This is
+not part of the initial ignition-only implementation.
+
+Before implementation, define injector and pump power-stage placement,
+timer and I/O allocation, fuel-pressure monitoring, sensor requirements,
+logging and calibration interfaces. Validate starting, warm-up, transient
+fuelling and voltage-dependent injector dead time, plus safe shutdown on
+engine stop or loss of crank synchronisation. Fuel-calibration fallback
+must be validated separately from the fixed-timing ignition fallback.
+Recheck power and flat-battery kick-start budgets with fuel-system loads;
+current spare interfaces do not establish injection readiness.
 
 ## 2. Block diagram
 
@@ -93,7 +110,7 @@ Does not own:
     |  |         <--> ICM-42688 IMU       |         |        |
     |  |         <--> W25N01GV NAND       |         |        |
     |  |  I2C1 <---> BME280 ambient       |         |        |
-    |  |         <-> AS5600 TPS           |         |        |
+    |  |  TPS received via CAN           |         |        |
     |  |  ADC1  <-- Vbat divider          |         |        |
     |  |        <-- Vbus divider          |         |        |
     |  |        <-- coil current sense    |         |        |
@@ -125,7 +142,7 @@ phase):
 | TIM8 (output compare) | Coil driver IGBT gate signal | Advanced timer, complementary output not needed but has BRK |
 | TIM3 or TIM4 | Miscellaneous PWM (fan, aux) | Reserved |
 | SPI1 | External flash + IMU + MAX31855 ×2 | Separate CS lines, DMA-driven for logging throughput |
-| I2C1 | BME280 + AS5600 TPS | 400 kHz fast mode |
+| I2C1 | BME280 | TPS acquired at warning cluster, received via CAN |
 | USART1 | Debug UART (SWD-adjacent) | Not routed off-PCB in normal build |
 | USART2 | Reserved (future: GPS backup, second CAN) | |
 | ADC1 | Vbat, Vbus, coil current sense, MCU internal temp | 12-bit with hardware oversampling to 16-bit |
@@ -227,14 +244,16 @@ comparison of installation options.
   I2C output.
 - Small diametric magnet on the twistgrip shaft; sensor on a bracket
   fixed to the handlebar.
-- I2C address 0x36 (fixed); shares I2C1 with BME280 (address 0x76).
-- Sample rate: 100 Hz.
-- Fault detection: I2C timeout, magnet-lost bit in AS5600 status
-  register.
+- Acquired/calibrated at the warning cluster, not on ECU I2C1.
+- CAN `user_input_fast` sample delivery: 100 Hz; ECU checks validity and
+  receive age under PAR-09.
+- Cluster detects I2C timeout and magnet-lost status, reports faults and
+  publishes validity. See [dashboard TPS](dashboard.md#5-twistgrip-tps).
 
 Note: TPS is *commanded* throttle (twistgrip position), not carburettor
 slide position. Cable slack/wear introduces a small offset. Acceptable
-for phase 1; revisit if carburettor is later replaced.
+for phase 1; phase-9 injection must evaluate actual throttle-body position
+sensing rather than assume twistgrip position is an adequate substitute.
 
 ### 5.6 Battery and DC bus voltage sensing
 
@@ -350,11 +369,11 @@ log-structured store with wear leveling. Holds:
 
 - Ignition timing map(s).
 - Crank angle sync offset calibration (measured at installation).
-- Sensor calibrations (thermocouple cold-junction offset, TPS zero,
-  battery divider ratios).
+- Sensor calibrations (thermocouple cold-junction offset,
+  battery divider ratios). Twistgrip TPS calibration belongs to the cluster.
 - Vehicle-frame IMU rotation matrix.
-- Odometer counters (though these may live on the handlebar
-  controller instead — decision open).
+- Session distance as required for logging. Lifetime odometer persistence
+  belongs to the speedometer, not the ECU.
 - Fault history (recent).
 
 Reset-to-defaults path in bootloader for recovery.
@@ -458,17 +477,10 @@ Connector candidate: **Deutsch DT-06-4S** for CAN + **automotive-
 grade USB-C receptacle** with sealed cap. Or a purpose-built
 combined connector.
 
-**Regarding long-cable I2C for TPS at handlebar**: I2C is not ideal
-over a metre-plus cable due to capacitance. Options:
-
-- Terminate TPS I2C at the handlebar controller, which broadcasts TPS
-  on CAN back to the ECU. Cleaner architecturally — TPS becomes a
-  handlebar-side sensor whose value the ECU consumes over CAN. Decision
-  moved to the handlebar controller doc.
-
-Working assumption for this doc: TPS is a handlebar controller
-responsibility, ECU receives it over CAN. Update to the sensor-list
-above is deferred until the handlebar controller doc formalises it.
+**TPS wiring:** the twistgrip sensor terminates at the warning cluster and
+is broadcast to ECU over CAN under ADR-0012. No metre-plus TPS I2C cable
+to the ECU is required. Validate the local satellite cable's electrical
+and EMC behaviour; define stale/invalid input fallback before engine tests.
 
 ## 10. Enclosure and thermal
 
@@ -587,16 +599,15 @@ the [staged plan](../project/staged-plan.md)):
 - **Log format** — self-describing binary custom vs. MCAP-native on
   device. Custom is simpler on device; MCAP-native is friendlier for
   tools. Decision needed before firmware log module is written.
-- **Odometer persistence location** — ECU config store vs. handlebar
-  controller. Handlebar makes more sense (survives ECU replacement
-  during development). Confirm in handlebar controller doc.
-- **TPS ownership** — provisionally on handlebar controller
-  (§9 note). Confirm.
+- **Odometer persistence details** — speedometer ownership is settled by
+  ADR-0012; restart/wrap reconciliation and tolerated loss remain PAR-10/11.
+- **TPS fault policy** — warning-cluster acquisition is settled; ECU stale
+  input and fallback acceptance remain PAR-09.
 
 ## Related
 
 - [System architecture](system.md)
 - [Power architecture](power.md)
-- CAN bus — to be written
-- Handlebar controller — to be written
-- Firmware architecture — to be written
+- [CAN bus](can-bus.md)
+- [Dashboard controllers](dashboard.md)
+- [Firmware architecture](firmware.md)

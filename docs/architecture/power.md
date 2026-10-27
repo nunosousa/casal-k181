@@ -81,7 +81,7 @@ Block-level:
         |
         +--> Battery + / − (LiFePO4 4-5 Ah)
         |
-        +--> Ignition switch --> switched rail --> handlebar ctrl
+        +--> Ignition switch --> protected branches --> three instruments
 
 Key architectural points:
 
@@ -102,7 +102,7 @@ bus voltage:
 | Load | Current draw |
 |---|---|
 | ECU running | ~0.5 A |
-| Handlebar controller (MCU + interior LEDs) | ~0.3 A |
+| Three instrument controllers (MCUs, CAN, local rails, gauges and interior LEDs) | TBD: measure each node and combined peak/steady load |
 | Ignition coil (time-averaged at idle ~3000 RPM, ~50 sparks/s) | ~0.1-0.2 A |
 | **Headlight low beam** (25-35 W incandescent) | **~2.1-2.9 A** |
 | **Tail lamp** (~5 W incandescent) | **~0.4 A** |
@@ -111,11 +111,13 @@ bus voltage:
 | Brake lamp (~21 W, transient) | ~1.75 A |
 | Horn (mechanical, momentary) | ~2-5 A |
 
-**Cruise steady-state (headlight low + tail + ECU + handlebar +
-coil):** ~3.5-4.0 A, ~50 W.
+**Cruise steady-state:** the former two-node estimate of ~3.5-4.0 A /
+~50 W is not a validated four-node budget. Recalculate with all three
+instrument controllers, stepper homing peaks, GPS and illumination before
+stator/regulator/fuse release; record margins under PAR-04.
 
-**Cruise with hazard (both indicators blinking) + brake pressed:** peak
-~7-8 A during the on-cycle of a blink.
+**Cruise with hazard + brake:** add the measured instrument load to the
+lamp/ECU/coil demand; the former ~7-8 A estimate needs revalidation.
 
 **Kick-start (ignition off, no lamps):** dominated by ECU + coil during
 starting = ~1 A. This bounds ADR-0004 supercap sizing (unchanged).
@@ -135,7 +137,8 @@ and typically a modern HT coil.
 The replacement is chosen because:
 
 - Typical VAPE-class kits deliver ~90-100 W at operating RPM,
-  comfortably above the ~50 W ADR-0005 running-load budget.
+  above the former ~50 W ADR-0005 estimate. Confirm actual reserve with
+  measured four-node loads; this is not yet a demonstrated margin.
 - No stator rewind coordination needed.
 - Fresh mechanical parts with known behaviour.
 
@@ -226,11 +229,10 @@ Revised current ratings:
 - **Per-node fuses:**
   - ECU (input protection stage feeding MCU and control electronics):
     5 A.
-  - Handlebar controller (small — controller electronics only, since
-    exterior lamp drive lives on the ECU per
-    [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)):
-    2 A.
-- **Per-lamp fuses (on-board the ECU):**
+  - Speedometer, tachometer and warning cluster: independently protected
+    branches; ratings TBD from measured loads, inrush and wire capacity.
+    No exterior power stage lives in an instrument enclosure.
+- **Per-lamp fuses (in the PDM):**
   - Headlight low: 5 A.
   - Headlight high: 5 A.
   - Tail + brake: 5 A.
@@ -239,9 +241,9 @@ Revised current ratings:
 - **Reverse polarity protection:** P-channel MOSFET ideal-diode on
   the ECU input. Unchanged.
 - **Transient protection:** TVS diode at each MCU-bearing node's
-  input; TVS on each lamp-drive output at the ECU.
-- **Ignition switch:** cuts the switched rail feeding the ECU's
-  lamp drive stage and the handlebar controller. ECU main power
+  input; TVS on each lamp-drive output at the PDM.
+- **Ignition switch:** cuts the switched instrument feeds and
+  applicable PDM exterior-load rail. ECU main power
   stays on the bus so the ECU can flush logs and sleep at ~5 mA
   standby.
 
@@ -268,7 +270,8 @@ Bounded by regulatory requirements:
   - Warning-lamp cluster brightness — reduce PWM duty.
   - Indicator repetition rate slightly reduced (still legally on).
 - ECU broadcasts bus voltage and battery voltage on CAN at 10 Hz.
-- Handlebar warns at ~12.5 V (~30 % SoC on LFP).
+- Warning cluster warns at ~12.5 V (provisional voltage threshold, subject
+  to battery/load validation rather than a precise state-of-charge claim).
 - Below ~12.0 V: illumination reduces, non-essential loads drop.
 - Below ~11.0 V: rider warning becomes urgent; consider stopping
   before the ECU brown-outs.
@@ -335,7 +338,7 @@ is a strong argument for rewinding.
 - Coil dwell time to reach target primary current.
 - ECU cold-boot time end-to-end (once first firmware exists).
 - **Actual bulb cold-inrush characteristic** — measured on the chosen
-  bulb model, informs MOSFET/relay sizing on the handlebar controller.
+  bulb model, informs MOSFET/relay sizing in the PDM.
 
 ## Open questions
 
@@ -364,4 +367,4 @@ is a strong argument for rewinding.
 - [ADR-0006: Modern magneto replacement](../project/decisions/0006-modern-magneto-replacement.md)
 - [ADR-0003: MCU family selection](../project/decisions/0003-mcu-family-selection.md)
 - [System architecture](system.md)
-- [Handlebar controller](handlebar-controller.md) — lamp drive stage
+- [Dashboard controllers](dashboard.md) — three switched instrument loads

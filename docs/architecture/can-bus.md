@@ -1,312 +1,176 @@
-# CAN bus architecture
-
-Protocol design for the vehicle CAN bus connecting the ECU and the
-handlebar controller. This document is the human-readable rationale;
-the machine-readable canonical definition lives in
-[`protocol/messages.yaml`](../../protocol/messages.yaml).
-
-Constrained by:
-
-- [ADR-0001: Two-node CAN topology](../project/decisions/0001-two-node-can-topology.md)
-- [System architecture](system.md)
-- [ECU subsystem](ecu.md)
-
-## 1. Scope
-
-Defines:
-
-- Physical-layer parameters.
-- Identifier allocation scheme.
-- Message categories and cycle times.
-- Bus-load budget.
-- Multi-frame handling.
-- Time-sync approach.
-- Error and heartbeat behaviour.
-- Diagnostic/configuration protocol layer.
-- Extension guidelines.
-
-Does not define:
-
-- Individual signal encodings — those live in `messages.yaml`.
-- Application-layer semantics — those live in the subsystem docs
-  (ecu.md, handlebar-controller.md).
-
-## 2. Physical layer
-
-- Standard CAN 2.0B (classic), operated on STM32 FDCAN peripherals in
-  classic mode.
-- **Bit rate: 500 kbit/s.**
-- **Identifier width: 11-bit.** Sufficient for a 2-node system and
-  simpler than 29-bit. 29-bit is not needed until we add a third node or
-  adopt J1939.
-- Twisted pair, 120 Ω termination at each end of the bus (both nodes
-  are physical bus ends).
-- Nominal common-mode range and drive per ISO 11898-2.
-- Transceivers: TCAN1042 (ECU side) or SN65HVD230 class, ESD-protected.
-- Bus stub length ≤ 30 cm at each node.
-
-## 3. Identifier allocation scheme
-
-CAN arbitration is dominance-of-zero — a lower ID transmits ahead of a
-higher ID when both nodes contend. IDs are allocated so that priority is
-implicit in the numeric range.
-
-| Range | Class | Producer | Typical rate |
-|---|---|---|---|
-| 0x000–0x03F | Emergency / critical events | Any | Event |
-| 0x040–0x0FF | Reserved (future emergency) | — | — |
-| 0x100–0x1FF | ECU fast periodic | ECU | 100 Hz |
-| 0x200–0x2FF | ECU medium/slow periodic | ECU | 1–10 Hz |
-| 0x300–0x3FF | Handlebar controller fast periodic | Handlebar | 100 Hz |
-| 0x400–0x4FF | Handlebar controller medium/slow periodic | Handlebar | 1–10 Hz |
-| 0x500–0x6FF | Reserved (future third node, expansion) | — | — |
-| 0x700–0x77F | Diagnostic request/response | Any | Event |
-| 0x780–0x7FF | Bootloader / firmware update | Any | Event |
-
-Emergency IDs get numerically-lowest values, ensuring they win
-arbitration against any periodic traffic.
-
-Rationale for producer-partitioned ranges: makes trace-reading trivial
-(any 0x1xx frame is from the ECU), avoids the trap of two nodes
-competing for the same ID range, keeps room for future producers.
-
-## 4. Message categories
-
-### 4.1 Emergency (event-driven, 0x000–0x03F)
-
-Fired by either node when a fault requires the other node's immediate
-attention.
-
-- `ecu_emergency_stop` — ECU shutting down engine due to critical fault.
-- `ecu_fault_event` — new entry added to the ECU fault log.
-- `handlebar_emergency_stop` — rider or handlebar controller requests
-  engine stop.
-- `handlebar_fault_event` — new entry added to the handlebar fault log.
-- `session_event` — start, stop, sleep, wake transitions.
-
-Consumers must act on emergency frames within one bus cycle
-(~1 ms worst case at 500 kbit/s with maximum non-emergency queue depth).
-
-### 4.2 ECU fast periodic (100 Hz, 0x100–0x1FF)
-
-Frames the handlebar needs at gauge-refresh rate.
-
-- `engine_state_fast` — RPM, commanded ignition advance, coil dwell
-  actual, engine-running flag.
-- `vehicle_state_fast` — wheel speed, distance-since-boot, movement
-  flag.
-- `throttle_state` — TPS echoed by the ECU as it observed the value
-  (handlebar-produced TPS mirrored to make the ECU's view visible for
-  logging and cross-check).
-
-Handlebar consumes `engine_state_fast` and `vehicle_state_fast` for the
-tachometer and speedometer needles.
-
-### 4.3 ECU medium periodic (10 Hz, 0x200–0x22F)
-
-- `thermal_state` — EGT, CHT, MCU internal temperature.
-- `power_state` — Vbat, Vbus, charge current.
-- `ignition_diag` — spark energy proxy, misfire counters, dwell error.
-
-### 4.4 ECU slow periodic (1 Hz, 0x230–0x2FF)
-
-- `ambient_state` — ambient temperature, pressure, relative humidity.
-- `ecu_heartbeat` — firmware version, uptime, fault-summary bits,
-  running-hours counter.
-
-### 4.5 Handlebar fast periodic (100 Hz, 0x300–0x3FF)
-
-- `user_input_fast` — TPS raw and filtered.
-- `handlebar_switches` — indicator, horn, headlight, mode-button state
-  bits.
-
-**Semantic note (per [ADR-0007](../project/decisions/0007-lamp-drive-moves-to-ecu.md)):**
-`handlebar_switches.indicator_left / indicator_right / hazard` bits
-carry **rider intent** (steady-state "L requested"), not the physical
-blink phase. The ECU consumes these bits and generates the exterior-
-lamp blink locally at ~1.5 Hz. The handlebar drives its dashboard
-indicator repeaters on its own timer at the same nominal rate.
-
-### 4.6 Handlebar medium periodic (5 Hz, 0x400–0x41F)
-
-- `gps_position` — latitude and longitude as int32 at 1e-7 degrees.
-- `gps_speed_alt` — GPS-derived speed, altitude, HDOP, satellite count.
-
-### 4.7 Handlebar slow periodic (1 Hz, 0x420–0x4FF)
-
-- `gps_fix_state` — fix quality, UTC time, geoidal separation.
-- `handlebar_heartbeat` — firmware version, uptime, fault-summary bits.
-
-### 4.8 Diagnostic (event, 0x700–0x77F)
-
-Simple request/response protocol for calibration, log queries and
-config uploads. Not UDS — this is a hobby project. See §9.
-
-### 4.9 Bootloader (event, 0x780–0x7FF)
-
-Handled by bootloader firmware only. Application firmware ignores
-these IDs.
-
-## 5. Bus loading estimate
-
-Frame size for classic CAN with 8-byte payload: ~135 bits including
-stuffing. At 500 kbit/s that's ~270 µs per frame.
-
-| Class | Frames/s | Bus time |
-|---|---|---|
-| ECU fast × 3 messages × 100 Hz | 300 | 81 ms/s |
-| ECU medium × 3 × 10 Hz | 30 | 8 ms/s |
-| ECU slow × 2 × 1 Hz | 2 | 0.5 ms/s |
-| Handlebar fast × 2 × 100 Hz | 200 | 54 ms/s |
-| Handlebar medium × 2 × 5 Hz | 10 | 3 ms/s |
-| Handlebar slow × 2 × 1 Hz | 2 | 0.5 ms/s |
-| Diagnostic / events (peak) | 20 | 5 ms/s |
-| **Total** | ~565 | **~152 ms/s ≈ 15 %** |
-
-15 % steady-state utilisation. Comfortable — leaves headroom for
-transient bursts of event frames and for future expansion. Worst-case
-frame latency for a medium-priority message at 15 % load with priority
-ordering is well under 5 ms.
-
-## 6. Multi-frame handling
-
-For phase 1, all messages fit in a single 8-byte CAN frame. Any future
-message requiring more than 8 bytes uses **ISO-TP (ISO 15765-2)**
-segmentation. Reserved IDs for ISO-TP:
-
-- Handlebar → ECU multi-frame: 0x780
-- ECU → Handlebar multi-frame: 0x781
-
-These are only exercised by the diagnostic protocol (e.g. downloading
-a chunk of the fault log). Not used in periodic traffic.
-
-## 7. Time synchronisation
-
-The ECU is the time master. Both nodes maintain a monotonic
-microsecond-resolution timer in local firmware. Every 1 s, the ECU
-broadcasts its current session time in a diagnostic frame; the
-handlebar controller tracks the offset between its local clock and the
-ECU's.
-
-For log analysis, the ECU's clock is authoritative. Handlebar-produced
-frames carry a local-timer field that the ECU maps to session time via
-the tracked offset.
-
-Precision required: ~1 ms. Well within reach of the periodic 1 Hz
-sync given the bus's bounded latency.
-
-Wall-clock time (UTC) comes from GPS via the handlebar heartbeat once a
-fix is acquired, and is used only to stamp session logs at
-start/stop — not for real-time control.
-
-## 8. Error handling and heartbeat
-
-### 8.1 Heartbeats
-
-Each node broadcasts a heartbeat at 1 Hz containing at minimum:
-
-- Firmware version (major.minor.patch, 3 bytes).
-- Uptime seconds (uint32 rolls over at ~136 years).
-- Fault-summary bitfield.
-
-Consumer behaviour when heartbeat is missing:
-
-- **Handlebar detects missing ECU heartbeat** (3 consecutive missed →
-  3 s timeout): freeze gauge needles at last-known values, illuminate a
-  general warning lamp, log a fault, keep displaying gauges as "last
-  known + timeout indicator." Do not blank the display.
-
-- **ECU detects missing handlebar heartbeat**: log a fault, keep
-  running the engine (the ECU does not depend on the handlebar for any
-  control function), continue broadcasting periodic frames so the
-  handlebar can resynchronise when it recovers.
-
-### 8.2 Bus errors
-
-Standard CAN error-frame handling by the transceivers and FDCAN
-peripheral. Firmware monitors bus-off state; on bus-off, waits for the
-peripheral's built-in recovery (128×11 recessive bits) then rejoins.
-Bus-off event logged.
-
-### 8.3 Signal plausibility
-
-Consumers apply plausibility checks on received signals (range, rate-
-of-change). Implausible values logged as a bus-integrity fault but do
-not automatically shut down the producer node.
-
-## 9. Diagnostic / configuration protocol
-
-Lightweight request/response over reserved IDs 0x700-0x77F. Two IDs per
-node pair for symmetry:
-
-- 0x700: request → ECU
-- 0x701: response from ECU
-- 0x702: request → handlebar controller
-- 0x703: response from handlebar controller
-
-Each request frame's first byte is a service ID; remaining bytes are
-service-specific. Long payloads use ISO-TP over 0x780/0x781.
-
-Service IDs (initial set, extensible):
-
-| Service | Description |
+# CAN bus architecture and protocol specification
+
+Protocol version 2 for ECU, speedometer, tachometer and warning-cluster
+controllers, per [ADR-0012](../project/decisions/0012-distributed-dashboard-can-nodes.md).
+The [CAN YAML](../../protocol/messages.yaml) owns wire encodings, node
+identities and declared periods. This document owns transport behaviour;
+the [ICD](interfaces.md) tracks unresolved acceptance details. No compatibility
+with the retired version-1 handlebar node is claimed.
+
+## 1. Physical layer and topology
+
+- Classic CAN using 11-bit identifiers at 500 kbit/s.
+- One transceiver per controller; suitable automotive/vehicle EMC protection.
+- Linear twisted-pair trunk with nominal 120-ohm termination at **exactly
+  two physical ends**, regardless of the four-node count.
+- Short instrument stubs, target <=30 cm; final layout, total length,
+  termination locations and signal integrity verified at harness release.
+- Four node addresses: ECU 0x01, warning cluster 0x02, speedometer 0x03,
+  tachometer 0x04. These logical addresses are not CAN arbitration IDs.
+- Service tools are external participants, not additional permanent vehicle
+  controllers. A service connection must not add another termination.
+
+## 2. Identifier allocation
+
+Lower identifiers win arbitration. One defined producer owns each vehicle
+message; `any` on diagnostics means one active external service master,
+not permission for competing simultaneous writers.
+
+| Range | Owner / class |
 |---|---|
-| 0x01 | Read fault log entry N |
-| 0x02 | Clear fault log |
-| 0x03 | Read config parameter by index |
-| 0x04 | Write config parameter (guarded; requires unlock) |
-| 0x05 | Unlock config-write session |
-| 0x06 | Read live signal (bypass periodic broadcast) |
-| 0x10 | Read firmware version + build hash |
-| 0x20 | Reset to safe-timing map |
-| 0xF0 | Reboot to bootloader |
+| 0x000-0x03F | Emergency, node fault and session events |
+| 0x040-0x0FF | Reserved |
+| 0x100-0x1FF | ECU fast telemetry |
+| 0x200-0x2FF | ECU medium/slow telemetry and heartbeat |
+| 0x300-0x3FF | Warning-cluster rider inputs |
+| 0x400-0x4FF | Warning-cluster GPS, heartbeat and brightness |
+| 0x500-0x5FF | Speedometer heartbeat / future telemetry |
+| 0x600-0x6FF | Tachometer heartbeat / future telemetry |
+| 0x700-0x77F | Node-addressed single-frame diagnostics |
+| 0x780-0x787 | Target-specific ISO-TP request/response transport |
+| 0x788-0x7FF | Reserved |
 
-Config-writes are session-guarded to prevent accidental overwrites from
-a stray tool. Session unlocked with a passphrase, expires after 60 s of
-inactivity.
+## 3. Message ownership and semantics
 
-## 10. Boot and node discovery
+- ECU `engine_state_fast` at 100 Hz feeds tachometer and warning cluster;
+  `vehicle_state_fast` at 100 Hz feeds speedometer and warning cluster.
+- ECU `throttle_state` echoes the TPS it consumed. Thermal, power,
+  ignition diagnostics and ambient messages feed the warning cluster.
+- Warning cluster produces `user_input_fast` and `handlebar_switches` at
+  100 Hz. The latter name identifies physical switchgear, not a separate
+  handlebar controller. Indicator/hazard bits are steady rider intent;
+  ECU generates exterior blink phase, cluster generates local repeaters.
+- GPS position/speed at 5 Hz and fix/UTC at 1 Hz originate at the cluster.
+- Cluster `dashboard_brightness` at 10 Hz feeds both gauges; each applies
+  a local curve and uses usable local brightness on stale/invalid input.
+- Each node emits its own heartbeat at 1 Hz and its own fault events.
+  ECU and cluster consume gauge heartbeats; gauges also consume ECU and
+  cluster heartbeats. Cluster loss must not blank gauge displays.
+- ECU session boundaries reach all three instruments. Gauge heartbeat
+  fault-summary bits report local health, not a claim that the engine is safe.
 
-There is no explicit "node discovery" — the bus is fixed at two nodes
-and each knows the other's ID ranges statically. However:
+Critical events have arbitration priority, but a frame's identifier alone
+does not prove an end-to-end response bound. Derive and measure deadlines,
+queueing, interrupt and actuator delay under PAR-06/08/09/12.
 
-- On boot, each node waits ≤ 200 ms observing bus activity before
-  transmitting anything. Prevents boot-race collisions.
-- First message from each node is its heartbeat, immediately.
-- If a node observes the other's heartbeat at boot, it logs "peer alive
-  at boot" for later correlation.
-- If a node observes no traffic within 1 s, it starts periodic
-  transmission anyway (isolated operation).
+## 4. Bus-load budget
 
-## 11. Version and compatibility
+Conservative estimate: 135 bits per 8-byte classic frame including stuffing,
+or about 270 microseconds at 500 kbit/s. Additional consumers do not duplicate
+broadcast frames.
 
-- The protocol has a single version integer, recorded in `messages.yaml`
-  as `version` and in each firmware image at build time.
-- Nodes running mismatched protocol versions log the mismatch and
-  continue operating with any messages they both understand. Older
-  fields are always preserved when adding new signals.
-- Breaking changes bump the version and require both firmware images
-  to be updated together. This is a hobby project — we do not attempt
-  to preserve multi-version compatibility, only detection.
+| Periodic producer/class | Frames/s |
+|---|---|
+| ECU fast (3 x 100 Hz) | 300 |
+| ECU medium (3 x 10 Hz) | 30 |
+| ECU slow (2 x 1 Hz) | 2 |
+| Cluster rider input (2 x 100 Hz) | 200 |
+| Cluster GPS (2 x 5 Hz + 1 x 1 Hz) | 11 |
+| Cluster heartbeat (1 Hz) | 1 |
+| Cluster brightness (10 Hz) | 10 |
+| Speedometer/tachometer heartbeats (1 Hz each) | 2 |
+| **Total periodic** | **556** |
 
-## 12. Extension guidelines
+Periodic utilisation is about **15.0%**. A provisional 20 frames/s
+event/diagnostic allowance gives about **15.6%**. This is a capacity estimate,
+not a latency proof. Validate burst traffic and priority behaviour. Bulk
+updates are service-mode operations, not part of the riding load budget.
 
-When adding new signals or messages:
+## 5. Diagnostics and update transport
 
-- Prefer adding a new signal to an existing periodic message before
-  creating a new message ID.
-- Preserve existing signal positions (start_bit, length_bits). Never
-  reorder; append instead.
-- Bump the `version` in `messages.yaml`.
-- Update this document's message tables (§4).
-- Regenerate protocol headers for both firmware images.
-- Note the change in a decision record if it changes ownership of any
-  signal.
+| Target | Single-frame request / response | ISO-TP tool request / target response |
+|---|---|---|
+| ECU | 0x700 / 0x701 | 0x780 / 0x781 |
+| Warning cluster | 0x702 / 0x703 | 0x782 / 0x783 |
+| Speedometer | 0x704 / 0x705 | 0x784 / 0x785 |
+| Tachometer | 0x706 / 0x707 | 0x786 / 0x787 |
 
-## 13. Related
+Use the target's ISO-TP pair in both application service and bootloader mode.
+Only one image for that target may respond at a time; the range is not
+bootloader-only. ISO-TP supplies segmentation/flow control, not an image
+update command format. Define update payloads, sequence/error handling,
+target-role checks and version compatibility before implementation.
+An ECU USB service bridge relays to the selected target; it does not broadcast
+one image to all instruments.
 
-- [`protocol/messages.yaml`](../../protocol/messages.yaml) — canonical
-  definition, used by codegen for both firmware images.
-- [System architecture](system.md)
-- [ECU subsystem](ecu.md)
-- Handlebar controller — to be written
+Initial service IDs remain:
+
+| ID | Service |
+|---|---|
+| 0x01 / 0x02 | Read / clear fault entry |
+| 0x03 / 0x04 | Read / guarded write configuration |
+| 0x05 | Unlock configuration write session |
+| 0x06 | Read live signal |
+| 0x10 | Firmware version and build identity |
+| 0x20 | ECU safe-timing selection (unsupported on instruments) |
+| 0xF0 | Enter target bootloader/service |
+
+Write sessions expire after 60 s inactivity under the existing proposal.
+Unlock format, service-specific payloads and physical/service guards need
+review; an unlock passphrase is not a security assurance. `not_supported`
+is explicit for services a target does not implement.
+
+## 6. Freshness, startup and recovery
+
+- Each instrument detects three consecutive missed ECU 1 Hz heartbeats.
+  Gauges hold their own last-known needles and indicate staleness locally;
+  the cluster independently warns. Local indication pattern and recovery
+  guards remain PAR-09, not assumed from peer visibility.
+- Cluster detects each gauge loss separately and warns. ECU logs node
+  health and continues engine control; gauge software is not an engine
+  prerequisite.
+- ECU must handle cluster loss and stale TPS/switch inputs under a validated
+  fallback policy. The cluster/CAN stop-request path must not be assumed
+  available during the fault that removed it.
+- Data freshness is per message, not inferred from a live heartbeat.
+  Range/rate checks, invalid/reserved encodings, receive age limits, period
+  tolerances and recovery hysteresis require PAR-09 closure.
+- CAN bus-off is logged; recovery follows the peripheral's CAN recovery
+  procedure and a bounded retry policy to be defined in PAR-09. Do not
+  represent stale state as recovered simply because the peripheral rejoined.
+- Fixed identities need no dynamic discovery. Send a heartbeat on readiness
+  then periodic traffic; ECU ignition readiness must not wait for peers.
+  A node rejoining an active bus must not reset other nodes.
+
+## 7. Time and protocol evolution
+
+ECU monotonic session time is authoritative for logs. GPS UTC comes from
+cluster `gps_fix_state`, not a heartbeat. Existing YAML does not provide
+a distributed time-sync exchange or sender timestamp in each telemetry
+frame; do not claim those capabilities. Use ECU receive timestamps until
+a reviewed time-sync interface is added if measurements require it.
+
+Change encodings, ownership or transport addresses through a reviewed
+protocol version and update all consumers/tests. Wire DLC/padding,
+compatibility checks, invalid data and firmware-image target identity remain
+release work under TASK-03/06. The YAML is a specification; protocol code
+generation is planned, not yet implemented.
+
+## Related
+
+- [Dashboard](dashboard.md), [firmware](firmware.md), [HIL](hil.md)
+- [Requirements](../project/requirements.md), [V&V](../project/verification-plan.md)
+
+## Specification regression checks
+
+Install [test dependencies](../../tools/requirements-dev.txt) in a development
+virtual environment, then run from the repository root:
+
+```sh
+python3 -m pip install -r tools/requirements-dev.txt
+python3 -m unittest discover -s tools -p 'test_*.py'
+```
+
+These check topology, ownership, frame layout, per-node service/health
+endpoints, transport collisions and the periodic load calculation. They
+validate the specification, not on-target CAN operation or V&V completion.

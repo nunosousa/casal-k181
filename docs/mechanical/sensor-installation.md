@@ -103,8 +103,8 @@ if response is inadequate.
 
 Contactless magnetic rotary sensor at the throttle twistgrip.
 Measures the twistgrip angle (0-90° typical) and reports over I2C to
-the handlebar controller. See
-[handlebar-controller §7](../architecture/handlebar-controller.md).
+the warning-cluster controller. See
+[dashboard TPS acquisition](../architecture/dashboard.md#5-twistgrip-tps).
 
 ### 3.2 Components
 
@@ -130,22 +130,23 @@ the handlebar controller. See
 ### 3.4 Wiring
 
 - **Cable:** 4-conductor shielded, JST-GH-terminated satellite side,
-  connector-appropriate handlebar-controller side.
-- **Length:** ~30 cm from twistgrip to handlebar controller in the
-  headlight nacelle.
+  connector-appropriate warning-cluster side.
+- **Length:** measure the actual run to the controller inside the warning
+  enclosure; do not assume the former headlight-nacelle location or ~30 cm.
+  Validate I2C capacitance/rise time and EMC on the installed cable.
 - **Routing:** through the switchgear housing on the handlebar,
-  down the handlebar tube, into the headlight nacelle.
+  into the warning-cluster enclosure, hidden in the period-style loom.
 
 ### 3.5 Calibration
 
 At first install:
 
 1. Rotate throttle to closed position (idle stop).
-2. In handlebar service view, read `tps_raw_deg` — record as
+2. In warning-cluster service view, read `tps_raw_deg` — record as
    `tps_zero_deg`.
 3. Rotate throttle to fully open (against the WFO stop).
 4. Read `tps_raw_deg` — record as `tps_full_deg`.
-5. Store both in the handlebar config store.
+5. Store both in the warning-cluster config store.
 
 TPS percentage = `(raw − zero) / (full − zero) × 100`, clamped to
 [0, 100].
@@ -222,10 +223,10 @@ re-open with same mount.
 
 - **Sensor cables run in the vehicle harness**, sharing a single
   cloth-over-braided loom where visible for the period aesthetic.
-- **All connectors sealed** at the ECU and handlebar controller
+- **All connectors sealed** at the ECU and all three instrument
   entry points per the connector specifications in
   [ecu.md §9](../architecture/ecu.md) and
-  [handlebar-controller.md §11](../architecture/handlebar-controller.md).
+  [dashboard hardware and packaging](../architecture/dashboard.md#2-common-hardware-and-packaging).
 - **No exposed sensor wiring** on the outside of the vehicle beyond
   the immediate sensor-to-bracket run.
 
@@ -248,13 +249,13 @@ Each sensor installation is verified before the vehicle is closed up:
 - **CHT sensor option** (A vs B) — pinned after bench comparison.
 - **BME280 heat-soak correction** — may need active handling in
   firmware if the static offset proves inadequate.
-- **Whether to add an ambient light sensor** to the handlebar (for
-  auto-dim) or to the ECU. Handlebar makes more sense; captured in
-  [handlebar-controller.md open questions](../architecture/handlebar-controller.md).
+- **Ambient-light mounting and calibration** — acquisition belongs to the
+  warning cluster under ADR-0012; establish exposure and shared dimming
+  curves without compromising the stock appearance.
 
 ## 9. Related
 
 - [ECU subsystem §5](../architecture/ecu.md)
-- [Handlebar controller §7-8](../architecture/handlebar-controller.md)
+- [Dashboard TPS and GPS](../architecture/dashboard.md)
 - [Trigger wheel](trigger-wheel.md)
 - [Wheel-speed target](wheel-speed-target.md)

@@ -3,6 +3,12 @@
 **Status:** Proposed
 **Date:** 2026-09-28
 
+**Topology revision:** [ADR-0012](0012-distributed-dashboard-can-nodes.md)
+replaces the single handlebar controller with speedometer, tachometer and
+warning-cluster nodes. The G474 is only a candidate for each instrument;
+package fit, runtime, power and per-node peripheral budgets need review.
+The original proposed selection below is not a released four-node allocation.
+
 ## Context
 
 The two-node CAN topology (ADR-0001) implies two independent MCU
